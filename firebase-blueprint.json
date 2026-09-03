@@ -1,0 +1,155 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile metadata and account creation timestamp",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "photoURL": { "type": "string", "description": "User avatar photo URL" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of account creation" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last profile sync" }
+      },
+      "required": ["uid", "createdAt"]
+    },
+    "JournalEntry": {
+      "title": "JournalEntry",
+      "description": "Individual reflective journal document authored by the user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique entry identifier" },
+        "userId": { "type": "string", "description": "Owner Firebase UID" },
+        "title": { "type": "string", "description": "Journal entry title" },
+        "content": { "type": "string", "description": "Rich or markdown reflection content" },
+        "mood": { "type": "string", "description": "Emotional state tag" },
+        "intention": { "type": "string", "description": "Journaling intention" },
+        "tags": { "type": "array", "description": "Topic or context tags" },
+        "photos": { "type": "array", "description": "Embedded polaroid photos" },
+        "location": { "type": "object", "description": "Google Maps tagged location" },
+        "voiceRecorded": { "type": "boolean", "description": "Whether voice dictation was used" },
+        "wordCount": { "type": "number", "description": "Calculated reflection word count" },
+        "createdAt": { "type": "string", "description": "Creation ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "Last modified ISO timestamp" },
+        "entryDate": { "type": "string", "description": "Optional backdated or scheduled date (YYYY-MM-DD)" },
+        "conversationId": { "type": "string", "description": "Associated dialogue thread id" },
+        "summaryId": { "type": "string", "description": "Associated distilled summary id" }
+      },
+      "required": ["id", "userId", "title", "content", "createdAt", "updatedAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Interactive reflective conversation thread with Gemini",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique conversation ID" },
+        "userId": { "type": "string", "description": "Owner Firebase UID" },
+        "title": { "type": "string", "description": "Conversation topic title" },
+        "createdAt": { "type": "string", "description": "Creation ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "Last updated ISO timestamp" },
+        "lastMessageSnippet": { "type": "string", "description": "Brief preview of latest message" },
+        "messageCount": { "type": "number", "description": "Total message count" },
+        "journalEntryId": { "type": "string", "description": "Optional linked journal entry" }
+      },
+      "required": ["id", "userId", "title", "createdAt", "updatedAt"]
+    },
+    "ConversationMessage": {
+      "title": "ConversationMessage",
+      "description": "Single turn inside a reflective dialogue",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Message ID" },
+        "role": { "type": "string", "enum": ["user", "assistant"], "description": "Role of the speaker" },
+        "content": { "type": "string", "description": "Message dialogue text" },
+        "timestamp": { "type": "string", "description": "Message ISO timestamp" },
+        "promptMode": { "type": "string", "description": "Gemini reflection mode used" }
+      },
+      "required": ["id", "role", "content", "timestamp"]
+    },
+    "ConversationSummary": {
+      "title": "ConversationSummary",
+      "description": "Distilled takeaways, core themes, and mindful next steps",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Summary ID" },
+        "conversationId": { "type": "string", "description": "Source conversation ID" },
+        "userId": { "type": "string", "description": "Owner Firebase UID" },
+        "title": { "type": "string", "description": "Distillation title" },
+        "mainThemes": { "type": "array", "description": "Extracted themes" },
+        "importantThoughts": { "type": "array", "description": "Key user thoughts" },
+        "keyInsights": { "type": "array", "description": "Transformative realizations" },
+        "reflectiveQuestions": { "type": "array", "description": "Lingering contemplation prompts" },
+        "suggestedNextSteps": { "type": "array", "description": "Mindful micro-habits" },
+        "createdAt": { "type": "string", "description": "Creation ISO timestamp" }
+      },
+      "required": ["id", "conversationId", "userId", "title", "createdAt"]
+    },
+    "InnerLandscapeSynthesis": {
+      "title": "InnerLandscapeSynthesis",
+      "description": "Longitudinal theme synthesis across multiple journal entries",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Synthesis ID" },
+        "userId": { "type": "string", "description": "Owner Firebase UID" },
+        "generatedAt": { "type": "string", "description": "Generation ISO timestamp" },
+        "entryCountAnalyzed": { "type": "number", "description": "Number of reflections analyzed" },
+        "corePillars": { "type": "array", "description": "Thematic pillars with frequencies" },
+        "emotionalCadence": { "type": "array", "description": "Observed emotional rhythm" },
+        "growthVectors": { "type": "array", "description": "Tangible self-compassion shifts" },
+        "personalMantra": { "type": "string", "description": "Grounding affirmation" },
+        "contemplativeInquiry": { "type": "string", "description": "Horizon inquiry question" }
+      },
+      "required": ["id", "userId", "generatedAt", "corePillars", "growthVectors", "personalMantra"]
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "description": "Mindful schedule event or backdated reflection milestone",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Event ID" },
+        "userId": { "type": "string", "description": "Owner Firebase UID" },
+        "title": { "type": "string", "description": "Event title" },
+        "date": { "type": "string", "description": "Date formatted YYYY-MM-DD" },
+        "time": { "type": "string", "description": "Time string" },
+        "category": { "type": "string", "description": "Milestone category" },
+        "notes": { "type": "string", "description": "Reflective event notes" },
+        "isCompleted": { "type": "boolean", "description": "Completion state" },
+        "priority": { "type": "string", "description": "Event priority" },
+        "createdAt": { "type": "string", "description": "Creation ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "Last modified ISO timestamp" }
+      },
+      "required": ["id", "userId", "title", "date", "category", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile root document locked to individual authenticated user"
+    },
+    "/users/{userId}/journals/{journalId}": {
+      "schema": { "$ref": "#/entities/JournalEntry" },
+      "description": "User private reflective journals"
+    },
+    "/users/{userId}/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "User private multi-turn dialogue sessions"
+    },
+    "/users/{userId}/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ConversationMessage" },
+      "description": "Individual messages in a user conversation"
+    },
+    "/users/{userId}/summaries/{summaryId}": {
+      "schema": { "$ref": "#/entities/ConversationSummary" },
+      "description": "User private distilled reflection summaries"
+    },
+    "/users/{userId}/insights/{insightId}": {
+      "schema": { "$ref": "#/entities/InnerLandscapeSynthesis" },
+      "description": "User private longitudinal growth syntheses"
+    },
+    "/users/{userId}/events/{eventId}": {
+      "schema": { "$ref": "#/entities/CalendarEvent" },
+      "description": "User private calendar milestones and events"
+    }
+  }
+}

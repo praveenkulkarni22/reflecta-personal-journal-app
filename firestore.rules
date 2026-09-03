@@ -1,0 +1,76 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for zero-trust attribute verification
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Default deny all unmatched paths & top-level collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Isolated user-owned root namespace
+    match /users/{userId} {
+      // User profile doc: only owner can read, create, or update; deletion disallowed
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && (request.resource.data.uid == null || request.resource.data.uid == userId);
+      allow delete: if false; // Protect user profile from accidental deletion
+
+      // Conversations subcollection
+      match /conversations/{conversationId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && (request.resource.data.userId == null || request.resource.data.userId == userId);
+        allow delete: if isOwner(userId);
+
+        // Messages subcollection
+        match /messages/{messageId} {
+          allow read: if isOwner(userId);
+          allow create, update: if isOwner(userId);
+          allow delete: if isOwner(userId);
+        }
+      }
+
+      // Standalone Journal Entries
+      match /journals/{journalId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && (request.resource.data.userId == null || request.resource.data.userId == userId);
+        allow delete: if isOwner(userId);
+      }
+
+      // Distilled Summaries
+      match /summaries/{summaryId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && (request.resource.data.userId == null || request.resource.data.userId == userId);
+        allow delete: if isOwner(userId);
+      }
+
+      // Longitudinal Insights & Themes (Original Enhancement)
+      match /insights/{insightId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && (request.resource.data.userId == null || request.resource.data.userId == userId);
+        allow delete: if isOwner(userId);
+      }
+
+      // Calendar Events & Reminders
+      match /events/{eventId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && (request.resource.data.userId == null || request.resource.data.userId == userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

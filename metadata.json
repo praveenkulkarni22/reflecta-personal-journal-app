@@ -1,0 +1,9 @@
+{
+  "name": "Reflecta",
+  "description": "A private AI-powered space for journaling, brainstorming, and meaningful multi-turn reflection with Gemini.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

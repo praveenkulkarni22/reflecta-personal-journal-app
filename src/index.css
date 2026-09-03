@@ -1,0 +1,261 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-serif: 'Playfair Display', Georgia, Cambria, 'Times New Roman', serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    /* Light Theme Tokens - Alabaster & Pearlescent Frosted Glass */
+    --bg-main: #f8faf9;
+    --bg-surface: rgba(255, 255, 255, 0.85);
+    --bg-card: rgba(255, 255, 255, 0.72);
+    --bg-input: rgba(255, 255, 255, 0.9);
+    --text-primary: #18181b;
+    --text-secondary: #52525b;
+    --text-muted: #71717a;
+    --border-subtle: rgba(0, 0, 0, 0.08);
+    --border-specular: rgba(255, 255, 255, 0.9);
+    --glass-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.07), 0 0 1px 1px rgba(0, 0, 0, 0.04);
+    --skeuo-inset: inset 0 1px 1px rgba(255, 255, 255, 1), inset 0 -1px 2px rgba(0, 0, 0, 0.03);
+    --accent-emerald: #059669;
+    --accent-amber: #d97706;
+  }
+
+  .dark {
+    /* Dark Theme Tokens - Obsidian & Deep Twilight Glass */
+    --bg-main: #0a0a0c;
+    --bg-surface: rgba(18, 18, 22, 0.85);
+    --bg-card: rgba(22, 22, 28, 0.75);
+    --bg-input: rgba(14, 14, 18, 0.75);
+    --text-primary: #f4f4f5;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-specular: rgba(255, 255, 255, 0.15);
+    --glass-shadow: 0 24px 50px -12px rgba(0, 0, 0, 0.6), 0 0 1px 1px rgba(255, 255, 255, 0.06);
+    --skeuo-inset: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 1px rgba(0, 0, 0, 0.4);
+    --accent-emerald: #10b981;
+    --accent-amber: #f59e0b;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    overflow-x: hidden;
+    transition: background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1), color 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  h1, h2, h3, .font-serif {
+    font-family: var(--font-serif);
+    letter-spacing: -0.015em;
+  }
+}
+
+/* ============================================================
+   Apple-Grade Glassmorphism & Skeuomorphic Depth Utilities
+   ============================================================ */
+
+/* Layer 1: Ambient Frosted Panel */
+.glass-panel-depth {
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark .glass-panel-depth {
+  background: linear-gradient(135deg, rgba(26, 26, 32, 0.8) 0%, rgba(16, 16, 20, 0.85) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 
+    0 20px 50px -10px rgba(0, 0, 0, 0.55),
+    0 1px 3px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+}
+
+.light .glass-panel-depth {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 250, 252, 0.82) 100%);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  box-shadow: 
+    0 20px 40px -15px rgba(0, 0, 0, 0.07),
+    0 2px 6px -1px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+}
+
+/* Layer 2: Tactile Skeuomorphic Button */
+.skeuo-button-primary {
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateZ(0);
+}
+
+.skeuo-button-primary:hover {
+  transform: translateY(-1px);
+}
+
+.skeuo-button-primary:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+/* Layer 3: Tactile Glass Input Surface */
+.glass-input-surface {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark .glass-input-surface {
+  background: rgba(14, 14, 18, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.dark .glass-input-surface:focus-within,
+.dark .glass-input-surface:focus {
+  border-color: rgba(16, 185, 129, 0.5);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15), inset 0 2px 4px rgba(0, 0, 0, 0.5);
+  background: rgba(18, 18, 24, 0.9);
+}
+
+.light .glass-input-surface {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.03), 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.light .glass-input-surface:focus-within,
+.light .glass-input-surface:focus {
+  border-color: rgba(5, 150, 105, 0.5);
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12), inset 0 1px 2px rgba(0, 0, 0, 0.04);
+  background: #ffffff;
+}
+
+/* ============================================================
+   Bento Grid Depth & Card Hover Elevators
+   ============================================================ */
+.bento-card-hover {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), 
+              box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1), 
+              border-color 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-style: preserve-3d;
+}
+
+.dark .bento-card-hover:hover {
+  transform: translateY(-3px) scale(1.008);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 30px rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.light .bento-card-hover:hover {
+  transform: translateY(-3px) scale(1.008);
+  box-shadow: 0 25px 45px -12px rgba(0, 0, 0, 0.12), 0 0 25px rgba(5, 150, 105, 0.08);
+  border-color: rgba(5, 150, 105, 0.3);
+}
+
+/* ============================================================
+   Tactile 3D HTML Flipbook Styles & Perspectives
+   ============================================================ */
+.flipbook-container {
+  perspective: 1600px;
+  perspective-origin: 50% 50%;
+}
+
+.flipbook-leaf {
+  transform-style: preserve-3d;
+  transition: transform 0.7s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.flipbook-spine-shadow {
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.35) 0%,
+    rgba(0, 0, 0, 0.1) 8%,
+    transparent 20%,
+    transparent 80%,
+    rgba(0, 0, 0, 0.1) 92%,
+    rgba(0, 0, 0, 0.35) 100%
+  );
+}
+
+/* ============================================================
+   Custom Scrollbar
+   ============================================================ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(150, 150, 150, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(150, 150, 150, 0.4);
+}
+
+/* ============================================================
+   Typographic Rhythm & Markdown
+   ============================================================ */
+.markdown-body {
+  line-height: 1.75;
+}
+
+.markdown-body p {
+  margin-bottom: 0.95rem;
+}
+
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body ul, .markdown-body ol {
+  margin-left: 1.35rem;
+  margin-bottom: 0.95rem;
+}
+
+.markdown-body li {
+  margin-bottom: 0.35rem;
+  list-style-type: disc;
+}
+
+.dark .markdown-body {
+  color: #e4e4e7;
+}
+
+.dark .markdown-body blockquote {
+  border-left: 3px solid rgba(16, 185, 129, 0.6);
+  padding-left: 1.1rem;
+  font-style: italic;
+  color: #a1a1aa;
+  margin: 1.1rem 0;
+  background: rgba(16, 185, 129, 0.04);
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.dark .markdown-body strong {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.light .markdown-body {
+  color: #27272a;
+}
+
+.light .markdown-body blockquote {
+  border-left: 3px solid rgba(5, 150, 105, 0.7);
+  padding-left: 1.1rem;
+  font-style: italic;
+  color: #52525b;
+  margin: 1.1rem 0;
+  background: rgba(5, 150, 105, 0.05);
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.light .markdown-body strong {
+  color: #09090b;
+  font-weight: 600;
+}
