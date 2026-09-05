@@ -6,6 +6,7 @@ import { JournalEditor } from './components/JournalEditor';
 import { ConversationView } from './components/ConversationView';
 import { HistoryArchive } from './components/HistoryArchive';
 import { CalendarView } from './components/CalendarView';
+import { NotebookPageFlipper } from './components/NotebookPageFlipper';
 import { SummaryModal } from './components/SummaryModal';
 import { InnerLandscapeModal } from './components/InnerLandscapeModal';
 import { FlipbookReader } from './components/FlipbookReader';
@@ -439,18 +440,25 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && !data?.summary) {
+        throw new Error(data?.error || 'Failed to distill summary');
+      }
+
+      const summaryPayload = data?.summary || {};
       const summaryId = `summary_${Date.now()}`;
       const fullSummary: ConversationSummary = {
         id: summaryId,
         conversationId: activeConversation?.id || 'direct_journal',
         userId: user.uid,
-        title: data.summary.title || 'Distilled Insight',
-        mainThemes: data.summary.mainThemes || [],
-        importantThoughts: data.summary.importantThoughts || [],
-        keyInsights: data.summary.keyInsights || [],
-        reflectiveQuestions: data.summary.reflectiveQuestions || [],
-        suggestedNextSteps: data.summary.suggestedNextSteps || [],
+        title: summaryPayload.title || title || currentEntry.title || 'Distilled Insight',
+        mainThemes: Array.isArray(summaryPayload.mainThemes) && summaryPayload.mainThemes.length > 0 
+          ? summaryPayload.mainThemes 
+          : ['Personal Clarity', 'Mindful Presence'],
+        importantThoughts: Array.isArray(summaryPayload.importantThoughts) ? summaryPayload.importantThoughts : [],
+        keyInsights: Array.isArray(summaryPayload.keyInsights) ? summaryPayload.keyInsights : [],
+        reflectiveQuestions: Array.isArray(summaryPayload.reflectiveQuestions) ? summaryPayload.reflectiveQuestions : [],
+        suggestedNextSteps: Array.isArray(summaryPayload.suggestedNextSteps) ? summaryPayload.suggestedNextSteps : [],
         createdAt: new Date().toISOString()
       };
 
@@ -465,6 +473,10 @@ export default function App() {
         origin: { y: 0.8 },
         colors: ['#10b981', '#34d399', '#6ee7b7']
       });
+
+      if (data?.quotaDepleted) {
+        showToast('Reflection distilled in mindful offline mode.');
+      }
     } catch (err) {
       console.error('Summarize error:', err);
       showToast('Failed to distill summary.');
@@ -496,23 +508,28 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && !data?.landscape) {
+        throw new Error(data?.error || 'Failed to synthesize landscape');
+      }
+
+      const landscapePayload = data?.landscape || {};
       const synthId = `landscape_${Date.now()}`;
       const fullSynth: InnerLandscapeSynthesis = {
         id: synthId,
         userId: user.uid,
         generatedAt: new Date().toISOString(),
         entryCountAnalyzed: journals.length,
-        corePillars: data.landscape.corePillars,
-        emotionalCadence: data.landscape.emotionalCadence,
-        growthVectors: data.landscape.growthVectors,
-        personalMantra: data.landscape.personalMantra,
-        contemplativeInquiry: data.landscape.contemplativeInquiry
+        corePillars: Array.isArray(landscapePayload.corePillars) ? landscapePayload.corePillars : [],
+        emotionalCadence: Array.isArray(landscapePayload.emotionalCadence) ? landscapePayload.emotionalCadence : [],
+        growthVectors: Array.isArray(landscapePayload.growthVectors) ? landscapePayload.growthVectors : [],
+        personalMantra: landscapePayload.personalMantra || 'I give myself permission to pause, breathe, and trust my journey.',
+        contemplativeInquiry: landscapePayload.contemplativeInquiry || 'What brings you the deepest sense of peace today?'
       };
 
       await saveLandscapeSynthesis(user.uid, fullSynth);
       setLandscapeSynthesis(fullSynth);
-      showToast('Inner Landscape synthesized.');
+      showToast(data?.quotaDepleted ? 'Inner Landscape synthesized in offline mode.' : 'Inner Landscape synthesized.');
       confetti({
         particleCount: 50,
         spread: 70,
@@ -596,8 +613,8 @@ export default function App() {
         {toastMessage && (
           <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-2xl border text-xs shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-3 duration-200 ${
             isDark
-              ? 'bg-neutral-900/90 border-amber-500/30 text-amber-300'
-              : 'bg-white/95 border-amber-500/40 text-amber-900 shadow-amber-500/10'
+              ? 'bg-neutral-900/90 border-teal-500/30 text-teal-200'
+              : 'bg-white/95 border-teal-500/40 text-teal-900 shadow-teal-500/10'
           }`}>
             {toastMessage}
           </div>
@@ -610,7 +627,7 @@ export default function App() {
   return (
     <div className={`min-h-screen relative transition-colors duration-300 ${
       isDark ? 'bg-neutral-950 text-neutral-100' : 'bg-neutral-100/90 text-neutral-900'
-    } selection:bg-amber-500/20 selection:text-amber-300`}>
+    } selection:bg-teal-500/20 selection:text-teal-200`}>
       
       {/* Interactive Physics Starry Canvas Layer */}
       <InteractiveBackground />
@@ -646,7 +663,7 @@ export default function App() {
 
         {/* Main Content Area */}
         <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${
-          isSidebarCollapsed ? 'ml-[72px]' : 'ml-0 md:ml-72'
+          isSidebarCollapsed ? 'ml-[64px]' : 'ml-0 md:ml-60'
         }`}>
           {/* Navigation Header */}
           <Navbar
@@ -660,66 +677,110 @@ export default function App() {
           />
 
           {/* Main Workspace */}
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-8 py-8">
-            {activeTab === 'journal' && (
-              <JournalEditor
-                currentEntry={currentEntry}
-                onSaveEntry={handleSaveEntry}
-                onStartReflection={handleStartReflection}
-                onSummarize={(title, content) => handleSummarize(title, content)}
-                onOpenSparks={() => setIsSparksOpen(true)}
-                isSaving={isSaving}
-              />
-            )}
+          <main className="flex-1 w-full min-w-0 flex flex-col p-2 sm:p-3 md:p-4 h-[calc(100vh-65px)] max-h-[calc(100vh-65px)] overflow-hidden">
+            <NotebookPageFlipper pageKey={activeTab}>
+              {activeTab === 'journal' && (
+                <JournalEditor
+                  currentEntry={currentEntry}
+                  onSaveEntry={handleSaveEntry}
+                  onStartReflection={handleStartReflection}
+                  onSummarize={(title, content) => handleSummarize(title, content)}
+                  onOpenSparks={() => setIsSparksOpen(true)}
+                  isSaving={isSaving}
+                  existingEntries={journals}
+                  onSelectDateEntry={(entry) => setCurrentEntry(entry)}
+                />
+              )}
 
-            {activeTab === 'conversations' && (
-              <ConversationView
-                messages={conversationMessages}
-                onSendMessage={(msg, mode) => handleSendMessage(msg, mode)}
-                onSummarize={() => handleSummarize()}
-                onBackToJournal={() => setActiveTab('journal')}
-                isGenerating={isGenerating}
-                modelUsed={lastModelUsed}
-                conversationTitle={activeConversation?.title || currentEntry.title}
-                error={genError}
-                onRetryLast={() => {
-                  const lastUserMsg = [...conversationMessages].reverse().find(m => m.role === 'user');
-                  if (lastUserMsg) {
-                    handleSendMessage(lastUserMsg.content, lastUserMsg.promptMode || 'reflect');
-                  }
-                }}
-              />
-            )}
+              {activeTab === 'conversations' && (
+                <div className={`relative flex-1 p-3.5 sm:p-5 sm:pl-8 sm:pr-6 transition-colors duration-200 flex flex-col min-h-0 w-full max-w-full overflow-hidden ${
+                  isDark ? 'bg-[#18181b] text-neutral-100' : 'bg-[#fdfbf7] text-neutral-900'
+                }`}>
+                  <div className={`absolute top-0 bottom-0 left-0 w-px border-r-2 border-dashed ${
+                    isDark ? 'border-neutral-700/60' : 'border-stone-300/80'
+                  }`} />
+                  <div className={`absolute top-0 bottom-0 left-3 sm:left-5 w-px ${
+                    isDark ? 'bg-rose-500/20' : 'bg-rose-400/40'
+                  }`} />
+                  <div 
+                    className="absolute inset-0 pointer-events-none opacity-40 dark:opacity-20"
+                    style={{
+                      backgroundImage: isDark
+                        ? 'repeating-linear-gradient(to bottom, transparent, transparent 29px, rgba(255,255,255,0.06) 29px, rgba(255,255,255,0.06) 30px)'
+                        : 'repeating-linear-gradient(to bottom, transparent, transparent 29px, rgba(0,0,0,0.06) 29px, rgba(0,0,0,0.06) 30px)'
+                    }}
+                  />
+                  <div className="relative z-10 flex-1 min-h-0 flex flex-col overflow-y-auto">
+                    <ConversationView
+                      messages={conversationMessages}
+                      onSendMessage={(msg, mode) => handleSendMessage(msg, mode)}
+                      onSummarize={() => handleSummarize()}
+                      onBackToJournal={() => setActiveTab('journal')}
+                      isGenerating={isGenerating}
+                      modelUsed={lastModelUsed}
+                      conversationTitle={activeConversation?.title || currentEntry.title}
+                      error={genError}
+                      onRetryLast={() => {
+                        const lastUserMsg = [...conversationMessages].reverse().find(m => m.role === 'user');
+                        if (lastUserMsg) {
+                          handleSendMessage(lastUserMsg.content, lastUserMsg.promptMode || 'reflect');
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
 
-            {activeTab === 'calendar' && (
-              <CalendarView
-                entries={journals}
-                events={events}
-                onAddEntryForDate={handleAddEntryForDate}
-                onOpenEntry={(entry) => {
-                  setCurrentEntry(entry);
-                  setActiveTab('journal');
-                }}
-                onSaveEvent={handleSaveCalendarEvent}
-                onDeleteEvent={handleDeleteCalendarEvent}
-                onToggleEventComplete={handleToggleCalendarEventComplete}
-              />
-            )}
+              {activeTab === 'calendar' && (
+                <CalendarView
+                  entries={journals}
+                  events={events}
+                  onAddEntryForDate={handleAddEntryForDate}
+                  onOpenEntry={(entry) => {
+                    setCurrentEntry(entry);
+                    setActiveTab('journal');
+                  }}
+                  onSaveEvent={handleSaveCalendarEvent}
+                  onDeleteEvent={handleDeleteCalendarEvent}
+                  onToggleEventComplete={handleToggleCalendarEventComplete}
+                />
+              )}
 
-            {activeTab === 'archive' && (
-              <HistoryArchive
-                entries={journals}
-                conversations={conversations}
-                summaries={summaries}
-                onSelectEntry={(entry) => {
-                  setCurrentEntry(entry);
-                  setActiveTab('journal');
-                }}
-                onSelectConversation={handleSelectConversation}
-                onDeleteEntry={handleDeleteEntry}
-                onOpenFlipbook={() => setIsFlipbookOpen(true)}
-              />
-            )}
+              {activeTab === 'archive' && (
+                <div className={`relative flex-1 p-3.5 sm:p-5 sm:pl-8 sm:pr-6 transition-colors duration-200 flex flex-col min-h-0 w-full max-w-full overflow-hidden ${
+                  isDark ? 'bg-[#18181b] text-neutral-100' : 'bg-[#fdfbf7] text-neutral-900'
+                }`}>
+                  <div className={`absolute top-0 bottom-0 left-0 w-px border-r-2 border-dashed ${
+                    isDark ? 'border-neutral-700/60' : 'border-stone-300/80'
+                  }`} />
+                  <div className={`absolute top-0 bottom-0 left-3 sm:left-5 w-px ${
+                    isDark ? 'bg-rose-500/20' : 'bg-rose-400/40'
+                  }`} />
+                  <div 
+                    className="absolute inset-0 pointer-events-none opacity-40 dark:opacity-20"
+                    style={{
+                      backgroundImage: isDark
+                        ? 'repeating-linear-gradient(to bottom, transparent, transparent 29px, rgba(255,255,255,0.06) 29px, rgba(255,255,255,0.06) 30px)'
+                        : 'repeating-linear-gradient(to bottom, transparent, transparent 29px, rgba(0,0,0,0.06) 29px, rgba(0,0,0,0.06) 30px)'
+                    }}
+                  />
+                  <div className="relative z-10 flex-1 min-h-0 flex flex-col overflow-y-auto pr-2">
+                    <HistoryArchive
+                      entries={journals}
+                      conversations={conversations}
+                      summaries={summaries}
+                      onSelectEntry={(entry) => {
+                        setCurrentEntry(entry);
+                        setActiveTab('journal');
+                      }}
+                      onSelectConversation={handleSelectConversation}
+                      onDeleteEntry={handleDeleteEntry}
+                      onOpenFlipbook={() => setIsFlipbookOpen(true)}
+                    />
+                  </div>
+                </div>
+              )}
+            </NotebookPageFlipper>
           </main>
         </div>
       </div>

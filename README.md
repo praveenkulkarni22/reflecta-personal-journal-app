@@ -12,7 +12,7 @@ Reflecta is built on a **defense-in-depth, zero-leakage security model**:
 
 - **Client Layer**: React 18 + TypeScript + Tailwind CSS with responsive typography, dark luxury styling, interactive volume reader, and Web Audio API-synthesized ambient noise generators.
 - **Server API Gateway**: Express (Node.js) server running on Cloud Run, proxying all Gemini 3.6 Flash calls server-side. Operational secrets (Gemini API keys) are **never exposed to the browser**.
-- **Gemini Resilience Ladder**: Automated fallback ladder (`gemini-3.6-flash` → `gemini-3.1-flash-lite` → `gemini-flash-latest` → `gemini-3.7-flash`) with error handling.
+- **Gemini Resilience Ladder**: Automated fallback ladder (`gemini-3.8-flash` → `gemini-flash-latest` → `gemini-3.1-flash-lite`) with zero-downtime offline reflective synthesis fallback.
 - **Authentication**: Firebase Authentication with Google Sign-In and token verification.
 - **Data Isolation**: Cloud Firestore with owner-bound, path-isolated security rules (`/users/{userId}/...`).
 - **Original Enhancement**: **The Inner Landscape Synthesizer** — a longitudinal synthesis engine analyzing recurring life pillars, emotional cadence vectors, personal grounding mantras, and seasonal contemplative inquiries.

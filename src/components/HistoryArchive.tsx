@@ -258,7 +258,7 @@ export const HistoryArchive: React.FC<HistoryArchiveProps> = ({
                         </span>
                       )}
                       {entry.photos && entry.photos.length > 0 && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
                           <ImageIcon className="w-2.5 h-2.5" />
                           <span>{entry.photos.length} {entry.photos.length === 1 ? 'photo' : 'photos'}</span>
                         </span>
@@ -404,9 +404,9 @@ export const HistoryArchive: React.FC<HistoryArchiveProps> = ({
                 <div className={`p-3.5 rounded-xl text-xs space-y-1 border ${
                   isDark
                     ? 'bg-neutral-950/60 border-white/[0.06] text-neutral-300'
-                    : 'bg-amber-50/60 border-amber-200/60 text-neutral-800'
+                    : 'bg-teal-50/60 border-teal-200/60 text-neutral-800'
                 }`}>
-                  <p className={`text-[10px] font-mono uppercase font-semibold ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>
+                  <p className={`text-[10px] font-mono uppercase font-semibold ${isDark ? 'text-teal-300' : 'text-teal-800'}`}>
                     Key Breakthrough:
                   </p>
                   <p className="font-light italic line-clamp-2">

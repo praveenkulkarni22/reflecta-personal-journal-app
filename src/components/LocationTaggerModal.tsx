@@ -177,7 +177,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
           {/* Header */}
           <div className="p-4 sm:p-5 border-b border-black/[0.06] dark:border-white/[0.08] flex items-center justify-between gap-4">
             <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-amber-500/15 text-amber-500 border border-amber-500/30">
+              <div className="p-2 rounded-xl bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/30">
                 <MapPin className="w-5 h-5" />
               </div>
               <div>
@@ -209,7 +209,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                 type="button"
                 onClick={handleDetectCurrentLocation}
                 disabled={isDetectingLocation}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-300 border border-amber-500/30 text-xs font-medium transition-all cursor-pointer shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 text-teal-700 dark:text-teal-300 border border-teal-500/30 text-xs font-medium transition-all cursor-pointer shadow-sm"
               >
                 <Crosshair className={`w-3.5 h-3.5 ${isDetectingLocation ? 'animate-spin' : ''}`} />
                 <span>{isDetectingLocation ? 'Detecting GPS...' : 'Detect Current Location'}</span>
@@ -236,10 +236,10 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
             {/* Google Maps API Key Panel (Prototyping / Production) */}
             {showKeyConfig && (
               <div className={`p-3.5 rounded-2xl border text-xs space-y-2.5 ${
-                isDark ? 'bg-neutral-950/60 border-amber-500/20' : 'bg-amber-50/70 border-amber-200'
+                isDark ? 'bg-neutral-950/60 border-teal-500/20' : 'bg-teal-50/70 border-teal-200'
               }`}>
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                  <span className="font-semibold flex items-center gap-1.5 text-teal-700 dark:text-teal-400">
                     <Globe className="w-3.5 h-3.5" />
                     <span>Google Maps Platform Integration</span>
                   </span>
@@ -247,7 +247,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                     href="https://mapsplatform.google.com/maps-demo-key?utm_campaign=gmp_mcp_codeassist_v1_aistudio"
                     target="_blank"
                     rel="noreferrer"
-                    className="text-[11px] underline text-amber-600 dark:text-amber-400 flex items-center gap-1 hover:opacity-80"
+                    className="text-[11px] underline text-teal-700 dark:text-teal-400 flex items-center gap-1 hover:opacity-80"
                   >
                     <span>Get Free Maps Demo Key</span>
                     <ExternalLink className="w-3 h-3" />
@@ -274,7 +274,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                       }
                       setShowKeyConfig(false);
                     }}
-                    className="px-3 py-1.5 text-xs font-medium rounded-xl bg-amber-500 text-neutral-950 font-semibold cursor-pointer hover:bg-amber-400 transition-colors"
+                    className="px-3 py-1.5 text-xs font-medium rounded-xl bg-teal-600 text-white font-semibold cursor-pointer hover:bg-teal-500 transition-colors"
                   >
                     Apply & Save
                   </button>
@@ -296,7 +296,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                   onChange={(e) => setLocationName(e.target.value)}
                   placeholder="e.g. Kyoto Zen Gardens, Lake Tahoe Cabin..."
                   className={`w-full px-3 py-2 text-xs rounded-xl border outline-none transition-colors ${
-                    isDark ? 'bg-neutral-950 border-neutral-700 focus:border-amber-500' : 'bg-white border-neutral-300 focus:border-amber-500'
+                    isDark ? 'bg-neutral-950 border-neutral-700 focus:border-teal-500' : 'bg-white border-neutral-300 focus:border-teal-500'
                   }`}
                 />
               </div>
@@ -313,7 +313,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                   onChange={(e) => setAddress(e.target.value)}
                   placeholder="e.g. Kyoto, Japan or GPS Coordinates..."
                   className={`w-full px-3 py-2 text-xs rounded-xl border outline-none transition-colors ${
-                    isDark ? 'bg-neutral-950 border-neutral-700 focus:border-amber-500' : 'bg-white border-neutral-300 focus:border-amber-500'
+                    isDark ? 'bg-neutral-950 border-neutral-700 focus:border-teal-500' : 'bg-white border-neutral-300 focus:border-teal-500'
                   }`}
                 />
               </div>
@@ -322,10 +322,10 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
             {/* Coordinates Display */}
             <div className="flex items-center justify-between text-[11px] font-mono px-3 py-1.5 rounded-xl border bg-black/[0.02] dark:bg-white/[0.02] border-black/[0.06] dark:border-white/[0.06]">
               <span className="flex items-center gap-1.5 opacity-70">
-                <Navigation className="w-3.5 h-3.5 text-amber-500" />
+                <Navigation className="w-3.5 h-3.5 text-teal-500" />
                 <span>Pinned Coordinates:</span>
               </span>
-              <span className="font-semibold text-amber-600 dark:text-amber-400">
+              <span className="font-semibold text-teal-700 dark:text-teal-400">
                 {coordinates.lat.toFixed(4)}° N, {coordinates.lng.toFixed(4)}° E
               </span>
             </div>
@@ -345,7 +345,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                     onClick={() => handleSelectPreset(preset)}
                     className={`px-2.5 py-1 rounded-full text-xs transition-all border cursor-pointer ${
                       locationName === preset.name
-                        ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border-amber-500/50 font-semibold'
+                        ? 'bg-teal-500/20 text-teal-700 dark:text-teal-300 border-teal-500/50 font-semibold'
                         : isDark
                           ? 'bg-neutral-950/60 text-neutral-400 border-white/[0.06] hover:text-white'
                           : 'bg-neutral-50 text-neutral-600 border-neutral-200 hover:text-neutral-900'
@@ -411,13 +411,13 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                   }}
                 >
                   <div className="relative z-10 flex flex-col items-center gap-2 max-w-sm">
-                    <div className="w-10 h-10 rounded-full bg-amber-500 text-neutral-950 flex items-center justify-center shadow-lg shadow-amber-500/30 animate-bounce">
+                    <div className="w-10 h-10 rounded-full bg-teal-600 text-white flex items-center justify-center shadow-lg shadow-teal-500/30 animate-bounce">
                       <MapPin className="w-5 h-5" />
                     </div>
                     <span className="font-serif font-medium text-sm">
                       {locationName || 'Pinned Reflection Location'}
                     </span>
-                    <span className="font-mono text-xs text-amber-500">
+                    <span className="font-mono text-xs text-teal-600 dark:text-teal-400">
                       {coordinates.lat}° N, {coordinates.lng}° E
                     </span>
                     <p className={`text-[11px] ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
@@ -447,7 +447,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
             <button
               type="button"
               onClick={handleConfirm}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-neutral-950 font-semibold text-xs shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-500 hover:to-teal-600 text-white font-semibold text-xs shadow-md shadow-teal-500/20 transition-all cursor-pointer"
             >
               <Check className="w-4 h-4" />
               <span>Tag This Location</span>

@@ -113,8 +113,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   return (
     <div className={`relative min-h-screen flex items-center justify-center px-4 py-12 overflow-hidden transition-colors duration-500 bg-transparent ${
       isDark 
-        ? 'text-neutral-100 selection:bg-amber-500/20 selection:text-amber-300' 
-        : 'text-neutral-900 selection:bg-amber-500/20 selection:text-amber-900'
+        ? 'text-neutral-100 selection:bg-teal-500/20 selection:text-teal-200' 
+        : 'text-neutral-900 selection:bg-teal-500/20 selection:text-teal-900'
     }`}>
       {/* Cool Autumn Atmosphere & Falling Orange Leaves Engine */}
       <InteractiveBackground />
@@ -131,21 +131,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           className={`flex items-center gap-1.5 px-3 py-2 rounded-full border text-xs font-medium tracking-wide transition-all duration-300 cursor-pointer ${
             skipTransition
               ? isDark
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_4px_15px_rgba(245,158,11,0.15)]'
-                : 'bg-amber-100 text-amber-900 border-amber-300 shadow-[0_4px_12px_rgba(217,119,6,0.1)]'
+                ? 'bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-[0_4px_15px_rgba(20,184,166,0.15)]'
+                : 'bg-teal-100 text-teal-900 border-teal-300 shadow-[0_4px_12px_rgba(13,148,136,0.1)]'
               : isDark
-              ? 'bg-neutral-900/80 text-neutral-300 border-white/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_8px_20px_rgba(0,0,0,0.5)] hover:bg-neutral-800 hover:text-amber-300'
-              : 'bg-white/90 text-neutral-700 border-black/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,1),0_8px_20px_rgba(0,0,0,0.06)] hover:bg-neutral-50 hover:text-amber-800'
+              ? 'bg-neutral-900/80 text-neutral-300 border-white/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_8px_20px_rgba(0,0,0,0.5)] hover:bg-neutral-800 hover:text-teal-300'
+              : 'bg-white/90 text-neutral-700 border-black/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,1),0_8px_20px_rgba(0,0,0,0.06)] hover:bg-neutral-50 hover:text-teal-800'
           }`}
         >
           {skipTransition ? (
             <>
-              <RotateCw className="w-3.5 h-3.5 text-amber-500" />
+              <RotateCw className="w-3.5 h-3.5 text-teal-500" />
               <span className="hidden sm:inline">Play Intro</span>
             </>
           ) : (
             <>
-              <FastForward className="w-3.5 h-3.5 text-amber-500" />
+              <FastForward className="w-3.5 h-3.5 text-teal-500" />
               <span>Skip Intro</span>
             </>
           )}
@@ -162,8 +162,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           title={isDark ? "Switch to Radiant Light Mode" : "Switch to Obsidian Dark Mode"}
           className={`p-2.5 rounded-full border transition-all duration-300 cursor-pointer ${
             isDark
-              ? 'bg-neutral-900/80 text-amber-300 border-white/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_8px_20px_rgba(0,0,0,0.5)] hover:bg-neutral-800'
-              : 'bg-white/90 text-amber-600 border-black/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,1),0_8px_20px_rgba(0,0,0,0.06)] hover:bg-neutral-50'
+              ? 'bg-neutral-900/80 text-teal-300 border-white/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_8px_20px_rgba(0,0,0,0.5)] hover:bg-neutral-800'
+              : 'bg-white/90 text-teal-700 border-black/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,1),0_8px_20px_rgba(0,0,0,0.06)] hover:bg-neutral-50'
           }`}
         >
           {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -174,14 +174,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       {isDark ? (
         <>
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_85%_65%_at_50%_10%,rgba(56,189,248,0.07),transparent_70%)] pointer-events-none" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_90%,rgba(234,88,12,0.1),transparent_60%)] pointer-events-none" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_90%,rgba(20,184,166,0.1),transparent_60%)] pointer-events-none" />
           <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(15,23,42,0.4),rgba(12,10,29,0.5),rgba(20,10,5,0.65))] pointer-events-none" />
         </>
       ) : (
         <>
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_85%_65%_at_50%_10%,rgba(14,165,233,0.05),transparent_70%)] pointer-events-none" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_90%,rgba(249,115,22,0.08),transparent_60%)] pointer-events-none" />
-          <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(241,245,249,0.4),rgba(255,255,255,0.5),rgba(254,243,199,0.35))] pointer-events-none" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_90%,rgba(20,184,166,0.08),transparent_60%)] pointer-events-none" />
+          <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(241,245,249,0.4),rgba(255,255,255,0.5),rgba(240,253,250,0.35))] pointer-events-none" />
         </>
       )}
 
@@ -199,16 +199,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           id="landing-logo"
           className={`relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center transition-all duration-300 ${
             isDark
-              ? 'bg-gradient-to-br from-amber-500/20 via-neutral-900 to-neutral-950 border border-amber-500/30 shadow-[0_8px_25px_rgba(245,158,11,0.2),inset_0_1px_0_rgba(255,255,255,0.2)]'
-              : 'bg-gradient-to-br from-amber-50 via-white to-amber-100/60 border border-amber-500/30 shadow-[0_8px_20px_rgba(217,119,6,0.15),inset_0_1px_0_rgba(255,255,255,1)]'
+              ? 'bg-gradient-to-br from-teal-500/20 via-neutral-900 to-neutral-950 border border-teal-500/30 shadow-[0_8px_25px_rgba(20,184,166,0.2),inset_0_1px_0_rgba(255,255,255,0.2)]'
+              : 'bg-gradient-to-br from-teal-50 via-white to-teal-100/60 border border-teal-500/30 shadow-[0_8px_20px_rgba(13,148,136,0.15),inset_0_1px_0_rgba(255,255,255,1)]'
           }`}
         >
           <span className={`font-serif text-3xl sm:text-4xl font-bold tracking-wider ${
-            isDark ? 'text-amber-400' : 'text-amber-600'
+            isDark ? 'text-teal-300' : 'text-teal-700'
           }`}>
             R
           </span>
-          <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-amber-400 rounded-full animate-pulse shadow-md shadow-amber-400/50" />
+          <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-teal-400 rounded-full animate-pulse shadow-md shadow-teal-400/50" />
         </motion.div>
 
         {/* App Title */}
@@ -225,7 +225,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <p
           id="landing-tagline"
           className={`font-serif text-2xl sm:text-3xl italic font-normal tracking-normal -mt-2 ${
-            isDark ? 'text-amber-300/90 sm:text-amber-200/95' : 'text-amber-700 sm:text-amber-800'
+            isDark ? 'text-teal-300/90 sm:text-teal-200/95' : 'text-teal-800 sm:text-teal-900'
           }`}
         >
           A place for every thought. A moment for yourself.
@@ -281,8 +281,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     className={`inline-block text-sm sm:text-base tracking-wide ${
                       lineObj.isAccent
                         ? isDark
-                          ? 'text-amber-300 font-normal'
-                          : 'text-amber-900 font-medium'
+                          ? 'text-teal-300 font-normal'
+                          : 'text-teal-900 font-medium'
                         : isDark
                           ? 'text-neutral-200 font-light'
                           : 'text-neutral-800 font-light'
@@ -303,7 +303,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           transition={{ duration: skipTransition ? 0.1 : 0.7, delay: finalStatementDelay }}
           id="landing-statement"
           className={`text-base sm:text-lg font-medium tracking-wide pt-1 ${
-            isDark ? 'text-amber-400' : 'text-amber-800'
+            isDark ? 'text-teal-300' : 'text-teal-800 font-semibold'
           }`}
         >
           Write freely. Talk naturally. Reflect deeply.
@@ -318,11 +318,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           id="landing-pill"
           className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-medium tracking-wide transition-all ${
             isDark
-              ? 'bg-amber-500/10 border border-amber-500/25 text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_2px_8px_rgba(245,158,11,0.1)]'
-              : 'bg-amber-50 border border-amber-300 text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,1),0_2px_6px_rgba(217,119,6,0.08)]'
+              ? 'bg-teal-500/10 border border-teal-500/25 text-teal-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_2px_8px_rgba(20,184,166,0.1)]'
+              : 'bg-teal-50 border border-teal-300 text-teal-800 shadow-[inset_0_1px_0_rgba(255,255,255,1),0_2px_6px_rgba(13,148,136,0.08)]'
           }`}
         >
-          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+          <Sparkles className="w-3.5 h-3.5 text-teal-500" />
           <span>Think. Reflect. Grow.</span>
         </motion.div>
 
@@ -336,7 +336,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           className={`w-full max-w-md mt-4 p-6 sm:p-7 rounded-3xl backdrop-blur-2xl transition-all duration-300 space-y-4 ${
             isDark
               ? 'bg-neutral-900/80 border border-white/[0.12] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8),inset_0_1px_0_rgba(255,255,255,0.14)]'
-              : 'bg-white/90 border border-black/[0.08] shadow-[0_25px_50px_-15px_rgba(217,119,6,0.12),inset_0_1px_0_rgba(255,255,255,1)]'
+              : 'bg-white/90 border border-black/[0.08] shadow-[0_25px_50px_-15px_rgba(13,148,136,0.12),inset_0_1px_0_rgba(255,255,255,1)]'
           }`}
         >
           {/* Primary CTA Button with Skeuomorphic Tactile Sheen */}
@@ -346,7 +346,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             id="landing-google-signin-btn"
             onClick={onSignIn}
             disabled={isLoading}
-            className="w-full group relative flex items-center justify-center gap-3 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-neutral-950 font-semibold text-sm sm:text-base shadow-[0_10px_25px_-5px_rgba(245,158,11,0.4),inset_0_1px_0_rgba(255,255,255,0.4),inset_0_-1px_0_rgba(0,0,0,0.2)] transition-all duration-200 cursor-pointer disabled:opacity-50"
+            className="w-full group relative flex items-center justify-center gap-3 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-teal-600 via-teal-600 to-emerald-700 hover:from-teal-500 hover:to-emerald-600 text-white font-semibold text-sm sm:text-base shadow-[0_10px_25px_-5px_rgba(13,148,136,0.4),inset_0_1px_0_rgba(255,255,255,0.3),inset_0_-1px_0_rgba(0,0,0,0.2)] transition-all duration-200 cursor-pointer disabled:opacity-50"
           >
             {/* Google G Logo Badge */}
             <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center p-1 shadow-[0_1px_3px_rgba(0,0,0,0.15)] shrink-0">
@@ -371,7 +371,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             <span>{isLoading ? 'Connecting...' : 'Start Reflecting with Google'}</span>
-            <ArrowRight className="w-4 h-4 text-neutral-950 group-hover:translate-x-1 transition-transform" />
+            <ArrowRight className="w-4 h-4 text-white group-hover:translate-x-1 transition-transform" />
           </motion.button>
 
           {/* Privacy Note with Lock Icon */}
@@ -381,7 +381,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               isDark ? 'text-neutral-400' : 'text-neutral-500'
             }`}
           >
-            <Lock className={`w-3.5 h-3.5 shrink-0 ${isDark ? 'text-amber-400/90' : 'text-amber-600'}`} />
+            <Lock className={`w-3.5 h-3.5 shrink-0 ${isDark ? 'text-teal-400/90' : 'text-teal-700'}`} />
             <span>Your personal sanctuary. Safe, confidential, and always just for you.</span>
           </div>
         </motion.div>
@@ -403,8 +403,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               className={`relative overflow-hidden rounded-2xl p-3.5 sm:p-4 border backdrop-blur-2xl transition-all duration-300 shadow-[0_20px_50px_rgba(0,0,0,0.45)] ${
                 authNotice.type === 'cancelled'
                   ? isDark
-                    ? 'bg-neutral-900/90 border-amber-500/30 text-amber-100'
-                    : 'bg-white/95 border-amber-500/40 text-amber-950 shadow-amber-950/10'
+                    ? 'bg-neutral-900/90 border-teal-500/30 text-teal-100'
+                    : 'bg-white/95 border-teal-500/40 text-teal-950 shadow-teal-950/10'
                   : authNotice.type === 'blocked'
                   ? isDark
                     ? 'bg-neutral-900/90 border-rose-500/30 text-rose-100'
@@ -418,7 +418,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <div
                 className={`absolute top-0 left-0 right-0 h-[2px] ${
                   authNotice.type === 'cancelled'
-                    ? 'bg-gradient-to-r from-transparent via-amber-400 to-transparent'
+                    ? 'bg-gradient-to-r from-transparent via-teal-400 to-transparent'
                     : authNotice.type === 'blocked'
                     ? 'bg-gradient-to-r from-transparent via-rose-400 to-transparent'
                     : 'bg-gradient-to-r from-transparent via-sky-400 to-transparent'
@@ -431,7 +431,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <div
                     className={`p-2 rounded-xl shrink-0 ${
                       authNotice.type === 'cancelled'
-                        ? isDark ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-700'
+                        ? isDark ? 'bg-teal-500/20 text-teal-400' : 'bg-teal-100 text-teal-700'
                         : authNotice.type === 'blocked'
                         ? isDark ? 'bg-rose-500/20 text-rose-400' : 'bg-rose-100 text-rose-700'
                         : isDark ? 'bg-neutral-800 text-neutral-300' : 'bg-neutral-100 text-neutral-700'
@@ -472,8 +472,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     title="Retry Google Sign-In"
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold tracking-wide transition-all shadow-sm cursor-pointer ${
                       isDark
-                        ? 'bg-amber-500 text-neutral-950 hover:bg-amber-400'
-                        : 'bg-amber-600 text-white hover:bg-amber-500'
+                        ? 'bg-teal-600 text-white hover:bg-teal-500'
+                        : 'bg-teal-600 text-white hover:bg-teal-700'
                     }`}
                   >
                     <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />

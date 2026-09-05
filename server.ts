@@ -277,11 +277,384 @@ app.get('/api/config/maps', verifyAuth, (req: AuthenticatedRequest, res) => {
 // Gemini SDK Initialization & Resilience Fallback Ladder
 // ----------------------------------------------------
 const FALLBACK_MODELS = [
-  'gemini-3.6-flash',
-  'gemini-3.1-flash-lite',
+  'gemini-3.8-flash',
   'gemini-flash-latest',
-  'gemini-3.7-flash'
+  'gemini-3.1-flash-lite'
 ];
+
+function isQuotaOrPrepaymentError(err: any): boolean {
+  if (!err) return false;
+  const msg = typeof err === 'string' ? err : err.message || JSON.stringify(err);
+  return (
+    msg.includes('429') ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.includes('prepayment credits are depleted') ||
+    msg.includes('quota') ||
+    msg.includes('billing')
+  );
+}
+
+// ----------------------------------------------------
+// Deterministic Mindful Offline Synthesis Engines
+// (Ensures zero runtime disruption when Gemini quota or credits are depleted)
+// ----------------------------------------------------
+
+function generateLocalSummary(title?: string, content?: string, messages?: { role: string; content: string }[]) {
+  const safeTitle = (title || '').trim();
+  const safeContent = (content || '').trim();
+  const dialogueLines = (messages || [])
+    .filter(m => m.role === 'user')
+    .map(m => m.content.trim())
+    .filter(Boolean);
+
+  // Extract candidate sentences from journal content & dialogue
+  const allText = [safeContent, ...dialogueLines].join(' ');
+  const rawSentences = allText
+    .split(/(?<=[.?!])\s+/)
+    .map(s => s.trim().replace(/^["'\s]+|["'\s]+$/g, ''))
+    .filter(s => s.length > 15 && s.length < 250);
+
+  const importantThoughts = rawSentences.slice(0, 3);
+  if (importantThoughts.length === 0) {
+    if (safeContent) {
+      importantThoughts.push(safeContent.slice(0, 180));
+    } else {
+      importantThoughts.push('Finding space to pause, reflect, and honor the present moment.');
+    }
+  }
+
+  // Derive themes from keywords
+  const themePool: { keyword: RegExp; theme: string }[] = [
+    { keyword: /work|job|career|project|boss|office/i, theme: 'Work & Professional Balance' },
+    { keyword: /anxi|stress|overwhelm|worry|fear|pressure/i, theme: 'Emotional Resilience & Releasing Tension' },
+    { keyword: /grat|thank|appreciat|gift|joy|smile/i, theme: 'Cultivating Gratitude & Joy' },
+    { keyword: /grow|learn|future|plan|goal|path|evolv/i, theme: 'Personal Evolution & Direction' },
+    { keyword: /friend|fam|love|partner|relation|connect/i, theme: 'Relational Bonds & Connection' },
+    { keyword: /rest|sleep|peace|calm|quiet|slow/i, theme: 'Restorative Stillness' },
+    { keyword: /doubt|confus|uncertain|lost|stuck/i, theme: 'Navigating Ambiguity' },
+    { keyword: /creative|art|write|idea|craft/i, theme: 'Creative Discovery' }
+  ];
+
+  const matchedThemes = themePool
+    .filter(t => t.keyword.test(allText))
+    .map(t => t.theme);
+
+  const mainThemes = matchedThemes.length > 0
+    ? matchedThemes.slice(0, 4)
+    : ['Mindful Presence', 'Inner Alignment', 'Clarity of Purpose'];
+
+  const finalTitle = safeTitle || (rawSentences[0] ? rawSentences[0].slice(0, 35) + '...' : 'Mindful Reflection Synthesis');
+
+  return {
+    title: finalTitle,
+    mainThemes,
+    importantThoughts,
+    keyInsights: [
+      'Pausing to reflect creates the space needed to transform passive reaction into deliberate response.',
+      'Naming internal emotions and observations lessens their overwhelming weight.',
+      'Clarity develops not by forcing answers, but by honoring where you currently stand.'
+    ],
+    reflectiveQuestions: [
+      'What is one gentle truth you learned about yourself during this reflection?',
+      'What expectation can you let go of today to create more ease in your mind?'
+    ],
+    suggestedNextSteps: [
+      'Take three slow diaphragmatic breaths before transitioning into your next task.',
+      'Revisit this entry tomorrow to see how these thoughts have settled.'
+    ]
+  };
+}
+
+function generateLocalLandscape(entries: any[]) {
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  const count = safeEntries.length;
+
+  // Aggregate moods
+  const moodCounts: Record<string, number> = {};
+  safeEntries.forEach(e => {
+    const m = e.mood || 'thoughtful';
+    moodCounts[m] = (moodCounts[m] || 0) + 1;
+  });
+
+  const emotionalCadence = Object.entries(moodCounts).map(([mood, countNum]) => {
+    const pct = Math.round((countNum / Math.max(count, 1)) * 100);
+    let narrative = 'A steady, contemplative baseline evident across your writing.';
+    if (mood === 'calm' || mood === 'peaceful') narrative = 'Grounding moments of presence and emotional balance.';
+    else if (mood === 'grateful') narrative = 'Recognizing daily gifts, sensory beauty, and relational gratitude.';
+    else if (mood === 'energized' || mood === 'inspired') narrative = 'Bursts of creative momentum and forward-looking clarity.';
+    else if (mood === 'vulnerable' || mood === 'tender') narrative = 'Courageous honesty acknowledging tender and raw realities.';
+    return { mood, frequency: pct, narrative };
+  });
+
+  return {
+    corePillars: [
+      {
+        theme: 'Intentional Living & Mindful Presence',
+        description: 'A recurring commitment to slowing down and capturing raw, honest life experience.',
+        frequency: 85,
+        keywords: ['awareness', 'presence', 'reflection', 'grounding']
+      },
+      {
+        theme: 'Emotional Clarity & Inner Processing',
+        description: 'Unpacking daily complexities through written reflection and self-compassion.',
+        frequency: 72,
+        keywords: ['clarity', 'unwinding', 'authenticity', 'processing']
+      },
+      {
+        theme: 'Continuous Growth & Purposeful Evolution',
+        description: 'Looking toward the horizon with curiosity, learning from each day.',
+        frequency: 64,
+        keywords: ['growth', 'learning', 'direction', 'values']
+      }
+    ],
+    emotionalCadence: emotionalCadence.length > 0 ? emotionalCadence : [
+      { mood: 'thoughtful', frequency: 60, narrative: 'A steady contemplative reflective pulse.' },
+      { mood: 'calm', frequency: 40, narrative: 'Quiet spaces of self-restoration.' }
+    ],
+    growthVectors: [
+      'Transitioning from automatic reactions toward deliberate contemplative pauses.',
+      'Deepening trust in your own inner wisdom across changing seasons of life.',
+      'Honoring emotions without letting temporary distress dictate your whole narrative.'
+    ],
+    personalMantra: 'I give myself permission to pause, breathe, and trust the unfolding of my journey.',
+    contemplativeInquiry: 'What would change if you met your current challenges with gentle curiosity instead of urgency?'
+  };
+}
+
+function generateLocalChatReply(message: string, mode: string): string {
+  const safeMsg = (message || '').trim();
+
+  switch (mode) {
+    case 'brainstorm':
+      return `Here are three creative avenues to explore what you just shared:\n\n` +
+        `1. **The Inversion Angle**: What if the opposite of your assumption were true? What possibilities would open up?\n` +
+        `2. **The 5-Year Horizon**: Looking back from five years in the future, what choice would feel most deeply aligned with your soul?\n` +
+        `3. **The Micro-Experiment**: What is the smallest, lowest-stakes step you could take today to test this idea?\n\n` +
+        `Which of these resonates most right now?`;
+    case 'socratic':
+      return `That is a meaningful sentiment to explore. Let's look beneath the surface.\n\n` +
+        `When you reflect on *" ${safeMsg.slice(0, 120)} "*, what underlying expectation or belief is shaping that view? If you released that expectation, what would remain?`;
+    case 'gratitude':
+      return `Thank you for pausing to honor that. There is profound grounding power in anchoring in gratitude.\n\n` +
+        `Take a slow breath and feel the ripple of this moment. What does this appreciation remind you about what truly matters to you?`;
+    case 'unpack':
+      return `Let's gently untangle this together.\n\n` +
+        `In what you just shared, notice what is directly within your control (your responses, boundaries, and attention) versus what belongs to the outside world.\n\n` +
+        `What is one thing on this list that you can give yourself permission to release today?`;
+    case 'reflect':
+    default:
+      return `I hear you, and it takes real honesty to put those words into perspective.\n\n` +
+        `When you sit with this thought for a quiet moment, what is the core emotion that feels most alive right now? What does this part of you need most today?`;
+  }
+}
+
+function generateLocalVoicePolish(speechText: string, mood?: string) {
+  const clean = (speechText || '')
+    .replace(/\b(um|uh|like|you know|sort of|kind of|i mean)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  // Divide into paragraphs if long
+  const sentences = clean.split(/(?<=[.?!])\s+/).filter(Boolean);
+  const paragraphs: string[] = [];
+  for (let i = 0; i < sentences.length; i += 3) {
+    paragraphs.push(sentences.slice(i, i + 3).join(' '));
+  }
+  const polishedReflection = paragraphs.join('\n\n') || clean || 'Spoken reflection captured.';
+  const suggestedTitle = sentences[0] ? sentences[0].slice(0, 40).trim() + (sentences[0].length > 40 ? '...' : '') : 'Spoken Reflection';
+
+  return {
+    suggestedTitle,
+    polishedReflection,
+    keyEmotions: [mood || 'thoughtful']
+  };
+}
+
+/**
+ * Intelligent deterministic offline emotion and EQ analysis fallback
+ */
+function generateLocalEmotionAnalysis(title?: string, content?: string) {
+  const text = `${title || ''} ${content || ''}`.toLowerCase();
+
+  const scores = {
+    peaceful: 0,
+    reflective: 0,
+    overload: 0,
+    depleted: 0
+  };
+
+  const peacefulWords = ['calm', 'peace', 'peaceful', 'quiet', 'still', 'serene', 'grateful', 'gratitude', 'thankful', 'breathe', 'breath', 'relax', 'content', 'gentle', 'ease', 'harmony', 'soft', 'grounded', 'blessed'];
+  const reflectiveWords = ['think', 'thoughtful', 'curious', 'question', 'wonder', 'explore', 'learn', 'grow', 'understand', 'realize', 'insight', 'meaning', 'purpose', 'vulnerable', 'honest', 'journey', 'future', 'perspective', 'energized', 'idea', 'creative'];
+  const overloadWords = ['stress', 'stressed', 'overwhelm', 'overwhelmed', 'anxious', 'anxiety', 'worry', 'worried', 'panic', 'frustrat', 'angry', 'irritat', 'too much', 'rush', 'busy', 'deadline', 'pressure', 'chaos', 'burnout', 'frazzled'];
+  const depletedWords = ['tired', 'exhaust', 'exhausted', 'drain', 'drained', 'sad', 'sorrow', 'grief', 'cry', 'crying', 'hopeless', 'depress', 'melanchol', 'disappoint', 'heavy', 'empty', 'lonely', 'disgust', 'hurt', 'weary'];
+
+  peacefulWords.forEach(w => { if (text.includes(w)) scores.peaceful += 2; });
+  reflectiveWords.forEach(w => { if (text.includes(w)) scores.reflective += 2; });
+  overloadWords.forEach(w => { if (text.includes(w)) scores.overload += 2; });
+  depletedWords.forEach(w => { if (text.includes(w)) scores.depleted += 2; });
+
+  let bestCat: 'peaceful' | 'reflective' | 'overload' | 'depleted' = 'reflective';
+  let maxScore = scores.reflective;
+
+  if (scores.peaceful > maxScore) {
+    bestCat = 'peaceful';
+    maxScore = scores.peaceful;
+  }
+  if (scores.overload > maxScore) {
+    bestCat = 'overload';
+    maxScore = scores.overload;
+  }
+  if (scores.depleted > maxScore) {
+    bestCat = 'depleted';
+    maxScore = scores.depleted;
+  }
+
+  let primaryMood = 'thoughtful';
+  let tags: string[] = [];
+  let eqSummary = {
+    emotionalQuotient: 'Adaptive Introspection',
+    tone: 'Contemplative & honest',
+    mindfulObservation: 'Demonstrates reflective self-awareness by putting thoughts into words.'
+  };
+
+  if (bestCat === 'peaceful') {
+    if (text.includes('grat') || text.includes('thank') || text.includes('appreciat') || text.includes('bless')) {
+      primaryMood = 'grateful';
+      tags = ['grateful', 'peaceful'];
+      eqSummary = {
+        emotionalQuotient: 'Cultivated Gratitude',
+        tone: 'Centered and appreciative',
+        mindfulObservation: 'Anchors current awareness in grateful recognition of life’s moments.'
+      };
+    } else if (text.includes('calm') || text.includes('relax') || text.includes('breath') || text.includes('still')) {
+      primaryMood = 'calm';
+      tags = ['calm', 'peaceful'];
+      eqSummary = {
+        emotionalQuotient: 'Somatic Stillness & Regulation',
+        tone: 'Serene and restful',
+        mindfulObservation: 'Demonstrates capacity to return to centered equilibrium and stillness.'
+      };
+    } else {
+      primaryMood = 'peaceful';
+      tags = ['peaceful', 'calm'];
+      eqSummary = {
+        emotionalQuotient: 'Harmonious Presence',
+        tone: 'Peaceful and balanced',
+        mindfulObservation: 'Meeting life with serene equanimity and gentle groundedness.'
+      };
+    }
+  } else if (bestCat === 'overload') {
+    if (text.includes('anxi') || text.includes('worr') || text.includes('fear') || text.includes('panic')) {
+      primaryMood = 'anxious';
+      tags = ['anxious', 'overwhelmed'];
+      eqSummary = {
+        emotionalQuotient: 'Courageous Vulnerability',
+        tone: 'Vigilant and honest',
+        mindfulObservation: 'Acknowledging emotional friction and seeking clarity under pressure.'
+      };
+    } else if (text.includes('frustrat') || text.includes('angr') || text.includes('annoy')) {
+      primaryMood = 'frustrated';
+      tags = ['frustrated', 'anxious'];
+      eqSummary = {
+        emotionalQuotient: 'Boundary Clarification',
+        tone: 'Direct and expressive',
+        mindfulObservation: 'Unpacking tension around expectations and personal agency.'
+      };
+    } else {
+      primaryMood = 'overwhelmed';
+      tags = ['overwhelmed', 'frustrated'];
+      eqSummary = {
+        emotionalQuotient: 'Boundary Awareness',
+        tone: 'Taxed yet seeking reprieve',
+        mindfulObservation: 'Recognizing cognitive saturation is the key step toward reclaiming ease.'
+      };
+    }
+  } else if (bestCat === 'depleted') {
+    if (text.includes('exhaust') || text.includes('tire') || text.includes('drain') || text.includes('weary')) {
+      primaryMood = 'exhausted';
+      tags = ['exhausted', 'melancholy'];
+      eqSummary = {
+        emotionalQuotient: 'Honest Energy Accounting',
+        tone: 'Weary and tender',
+        mindfulObservation: 'Extending gentle self-compassion when vital batteries need recharging.'
+      };
+    } else if (text.includes('sad') || text.includes('sorrow') || text.includes('grief') || text.includes('cry')) {
+      primaryMood = 'sorrow';
+      tags = ['sorrow', 'melancholy'];
+      eqSummary = {
+        emotionalQuotient: 'Affective Depth & Honesty',
+        tone: 'Mournful yet authentic',
+        mindfulObservation: 'Honoring sorrow as an authentic and tender human expression.'
+      };
+    } else if (text.includes('disappoint')) {
+      primaryMood = 'disappointed';
+      tags = ['disappointed', 'melancholy'];
+      eqSummary = {
+        emotionalQuotient: 'Recalibrating Expectations',
+        tone: 'Melancholy and readjusting',
+        mindfulObservation: 'Working through unmet expectations with quiet self-honesty.'
+      };
+    } else {
+      primaryMood = 'melancholy';
+      tags = ['melancholy', 'exhausted'];
+      eqSummary = {
+        emotionalQuotient: 'Reflective Sensitivity',
+        tone: 'Subdued and poignant',
+        mindfulObservation: 'Allowing tender emotions space without forcing artificial cheer.'
+      };
+    }
+  } else {
+    // Reflective
+    if (text.includes('curio') || text.includes('wonder') || text.includes('question')) {
+      primaryMood = 'curious';
+      tags = ['curious', 'thoughtful'];
+      eqSummary = {
+        emotionalQuotient: 'Epistemic Openness',
+        tone: 'Inquisitive and engaged',
+        mindfulObservation: 'Approaching reality with beginner’s mind and open exploration.'
+      };
+    } else if (text.includes('energi') || text.includes('excit') || text.includes('inspire')) {
+      primaryMood = 'energized';
+      tags = ['energized', 'thoughtful'];
+      eqSummary = {
+        emotionalQuotient: 'Dynamic Vitality',
+        tone: 'Invigorated and forward-moving',
+        mindfulObservation: 'Channeling mental clarity into creative momentum and agency.'
+      };
+    } else if (text.includes('search') || text.includes('seek') || text.includes('lost') || text.includes('where')) {
+      primaryMood = 'searching';
+      tags = ['searching', 'thoughtful'];
+      eqSummary = {
+        emotionalQuotient: 'Purposeful Wayfinding',
+        tone: 'Reflective and seeking',
+        mindfulObservation: 'Searching for alignment and deeper grounding in core personal values.'
+      };
+    } else if (text.includes('vulnerab') || text.includes('open') || text.includes('fear')) {
+      primaryMood = 'vulnerable';
+      tags = ['vulnerable', 'thoughtful'];
+      eqSummary = {
+        emotionalQuotient: 'Courageous Authenticity',
+        tone: 'Open-hearted and candid',
+        mindfulObservation: 'Bravely facing raw truths without emotional armor or avoidance.'
+      };
+    } else {
+      primaryMood = 'thoughtful';
+      tags = ['thoughtful', 'curious'];
+      eqSummary = {
+        emotionalQuotient: 'High Self-Awareness',
+        tone: 'Contemplative & observant',
+        mindfulObservation: 'Observing internal thoughts with patience and mindful perspective.'
+      };
+    }
+  }
+
+  return {
+    category: bestCat,
+    primaryMood,
+    tags,
+    eqAnalysis: eqSummary
+  };
+}
 
 function getGeminiClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -368,6 +741,7 @@ const synthesizeLandscapeSchema = z.object({
     content: z.string().max(50000),
     mood: z.string().optional(),
     intention: z.string().optional(),
+    tags: z.array(z.string()).optional(),
     createdAt: z.string()
   })).min(1).max(50)
 });
@@ -375,6 +749,11 @@ const synthesizeLandscapeSchema = z.object({
 const sparkRequestSchema = z.object({
   intention: z.string().max(100).optional().default('general'),
   mood: z.string().max(100).optional().default('calm')
+});
+
+const analyzeEmotionsRequestSchema = z.object({
+  title: z.string().max(200).optional().default(''),
+  content: z.string().max(50000).optional().default('')
 });
 
 // ----------------------------------------------------
@@ -468,22 +847,38 @@ app.post('/api/gemini/chat', verifyAuth, async (req: AuthenticatedRequest, res) 
       parts: [{ text: message }]
     });
 
-    const result = await generateContentWithFallback({
-      systemInstruction,
-      contents: formattedContents,
-      temperature: 0.75
-    });
+    let replyText = '';
+    let modelUsed = 'gemini-3.8-flash';
+    let isQuotaDepleted = false;
+
+    try {
+      const result = await generateContentWithFallback({
+        systemInstruction,
+        contents: formattedContents,
+        temperature: 0.75
+      });
+      replyText = result.text;
+      modelUsed = result.modelUsed;
+    } catch (apiErr: any) {
+      isQuotaDepleted = isQuotaOrPrepaymentError(apiErr);
+      console.warn('Chat API Gemini model unavailable, utilizing reflective offline companion:', apiErr?.message || apiErr);
+      replyText = generateLocalChatReply(message, mode);
+      modelUsed = 'reflective-offline-companion';
+    }
 
     return res.json({
-      reply: result.text,
-      modelUsed: result.modelUsed,
-      mode
+      reply: replyText,
+      modelUsed,
+      mode,
+      quotaDepleted: isQuotaDepleted
     });
   } catch (err: any) {
     console.error('Chat API Error:', err.message || err);
-    return res.status(500).json({
-      error: 'Unable to complete reflection at this moment. Your thoughts are safe.',
-      code: 'GEMINI_FAILURE'
+    return res.json({
+      reply: generateLocalChatReply(req.body?.message || '', req.body?.mode || 'reflect'),
+      modelUsed: 'reflective-offline-companion',
+      mode: req.body?.mode || 'reflect',
+      quotaDepleted: true
     });
   }
 });
@@ -534,37 +929,62 @@ Extract:
       required: ['title', 'mainThemes', 'importantThoughts', 'keyInsights', 'reflectiveQuestions', 'suggestedNextSteps']
     };
 
-    const result = await generateContentWithFallback({
-      systemInstruction,
-      contents: [{ role: 'user', parts: [{ text: transcript }] }],
-      responseSchema: summarySchema,
-      responseMimeType: 'application/json',
-      temperature: 0.4
-    });
+    let parsedSummary: any = null;
+    let modelUsed = 'gemini-3.8-flash';
+    let isQuotaDepleted = false;
 
-    let parsedSummary;
     try {
+      const result = await generateContentWithFallback({
+        systemInstruction,
+        contents: [{ role: 'user', parts: [{ text: transcript }] }],
+        responseSchema: summarySchema,
+        responseMimeType: 'application/json',
+        temperature: 0.4
+      });
+
       parsedSummary = JSON.parse(result.text);
-    } catch {
-      parsedSummary = {
-        title: reflectionTitle || 'Reflective Synthesis',
-        mainThemes: ['Personal Clarity', 'Mindful Presence'],
-        importantThoughts: ['Finding space to reflect amidst daily movement.'],
-        keyInsights: ['Pausing allows hidden thoughts to surface gracefully.'],
-        reflectiveQuestions: ['What small step brings the greatest peace today?'],
-        suggestedNextSteps: ['Take a 5-minute quiet breath before starting tomorrow.']
-      };
+      modelUsed = result.modelUsed;
+    } catch (apiErr: any) {
+      isQuotaDepleted = isQuotaOrPrepaymentError(apiErr);
+      console.warn('Summarize Gemini unavailable, utilizing reflective offline synthesis:', apiErr?.message || apiErr);
+      parsedSummary = generateLocalSummary(reflectionTitle, reflectionContent, messages);
+      modelUsed = 'reflective-offline-synthesis';
     }
+
+    if (!parsedSummary || typeof parsedSummary !== 'object') {
+      parsedSummary = generateLocalSummary(reflectionTitle, reflectionContent, messages);
+    }
+
+    // Bulletproof defensive normalization
+    parsedSummary.title = parsedSummary.title || reflectionTitle || 'Reflective Synthesis';
+    parsedSummary.mainThemes = Array.isArray(parsedSummary.mainThemes) && parsedSummary.mainThemes.length > 0 
+      ? parsedSummary.mainThemes 
+      : ['Personal Clarity', 'Mindful Presence'];
+    parsedSummary.importantThoughts = Array.isArray(parsedSummary.importantThoughts) && parsedSummary.importantThoughts.length > 0 
+      ? parsedSummary.importantThoughts 
+      : ['Finding space to reflect amidst daily movement.'];
+    parsedSummary.keyInsights = Array.isArray(parsedSummary.keyInsights) && parsedSummary.keyInsights.length > 0 
+      ? parsedSummary.keyInsights 
+      : ['Pausing allows hidden thoughts to surface gracefully.'];
+    parsedSummary.reflectiveQuestions = Array.isArray(parsedSummary.reflectiveQuestions) && parsedSummary.reflectiveQuestions.length > 0 
+      ? parsedSummary.reflectiveQuestions 
+      : ['What small step brings the greatest peace today?'];
+    parsedSummary.suggestedNextSteps = Array.isArray(parsedSummary.suggestedNextSteps) && parsedSummary.suggestedNextSteps.length > 0 
+      ? parsedSummary.suggestedNextSteps 
+      : ['Take a 5-minute quiet breath before starting tomorrow.'];
 
     return res.json({
       summary: parsedSummary,
-      modelUsed: result.modelUsed
+      modelUsed,
+      quotaDepleted: isQuotaDepleted
     });
   } catch (err: any) {
     console.error('Summarize API Error:', err.message || err);
-    return res.status(500).json({
-      error: 'Failed to distill reflection summary',
-      code: 'SUMMARIZE_FAILURE'
+    const fallback = generateLocalSummary(req.body?.reflectionTitle, req.body?.reflectionContent, req.body?.messages);
+    return res.json({
+      summary: fallback,
+      modelUsed: 'reflective-offline-synthesis',
+      quotaDepleted: true
     });
   }
 });
@@ -586,7 +1006,7 @@ app.post('/api/gemini/synthesize-landscape', verifyAuth, async (req: Authenticat
     const { entries } = parseResult.data;
 
     let aggregateText = entries.map((e, idx) => `
-[Entry #${idx + 1} | Date: ${e.createdAt} | Mood: ${e.mood || 'N/A'} | Intention: ${e.intention || 'N/A'}]
+[Entry #${idx + 1} | Date: ${e.createdAt} | Mood: ${e.mood || 'N/A'} | Intention: ${e.intention || 'N/A'} | Emotion Tags: ${(e.tags || []).join(', ') || 'N/A'}]
 Title: ${e.title}
 Content:
 ${e.content.slice(0, 1500)}
@@ -644,26 +1064,46 @@ Identify:
       required: ['corePillars', 'emotionalCadence', 'growthVectors', 'personalMantra', 'contemplativeInquiry']
     };
 
-    const result = await generateContentWithFallback({
-      systemInstruction,
-      contents: [{ role: 'user', parts: [{ text: aggregateText }] }],
-      responseSchema: landscapeSchema,
-      responseMimeType: 'application/json',
-      temperature: 0.5
-    });
+    let parsedLandscape: any = null;
+    let modelUsed = 'gemini-3.8-flash';
+    let isQuotaDepleted = false;
 
-    const parsedLandscape = JSON.parse(result.text);
+    try {
+      const result = await generateContentWithFallback({
+        systemInstruction,
+        contents: [{ role: 'user', parts: [{ text: aggregateText }] }],
+        responseSchema: landscapeSchema,
+        responseMimeType: 'application/json',
+        temperature: 0.5
+      });
+
+      parsedLandscape = JSON.parse(result.text);
+      modelUsed = result.modelUsed;
+    } catch (apiErr: any) {
+      isQuotaDepleted = isQuotaOrPrepaymentError(apiErr);
+      console.warn('Landscape synthesis Gemini unavailable, utilizing reflective offline synthesis:', apiErr?.message || apiErr);
+      parsedLandscape = generateLocalLandscape(entries);
+      modelUsed = 'reflective-offline-synthesis';
+    }
+
+    if (!parsedLandscape || typeof parsedLandscape !== 'object') {
+      parsedLandscape = generateLocalLandscape(entries);
+    }
 
     return res.json({
       landscape: parsedLandscape,
       entryCountAnalyzed: entries.length,
-      modelUsed: result.modelUsed
+      modelUsed,
+      quotaDepleted: isQuotaDepleted
     });
   } catch (err: any) {
     console.error('Landscape Synthesis Error:', err.message || err);
-    return res.status(500).json({
-      error: 'Failed to synthesize inner landscape',
-      code: 'LANDSCAPE_FAILURE'
+    const fallback = generateLocalLandscape(req.body?.entries || []);
+    return res.json({
+      landscape: fallback,
+      entryCountAnalyzed: Array.isArray(req.body?.entries) ? req.body.entries.length : 0,
+      modelUsed: 'reflective-offline-synthesis',
+      quotaDepleted: true
     });
   }
 });
@@ -817,34 +1257,169 @@ Respond strictly in JSON with this schema:
       required: ['suggestedTitle', 'polishedReflection', 'keyEmotions']
     };
 
-    const result = await generateContentWithFallback({
-      systemInstruction,
-      contents: [{ role: 'user', parts }],
-      responseSchema: voiceOutputSchema,
-      responseMimeType: 'application/json',
-      temperature: 0.5
-    });
+    let parsed: any = null;
+    let modelUsed = 'gemini-3.8-flash';
+    let isQuotaDepleted = false;
 
-    let parsed;
     try {
+      const result = await generateContentWithFallback({
+        systemInstruction,
+        contents: [{ role: 'user', parts }],
+        responseSchema: voiceOutputSchema,
+        responseMimeType: 'application/json',
+        temperature: 0.5
+      });
+
       parsed = JSON.parse(result.text);
-    } catch {
-      parsed = {
-        suggestedTitle: 'Spoken Reflection',
-        polishedReflection: speechText,
-        keyEmotions: [mood]
-      };
+      modelUsed = result.modelUsed;
+    } catch (apiErr: any) {
+      isQuotaDepleted = isQuotaOrPrepaymentError(apiErr);
+      console.warn('Voice reflection Gemini unavailable, utilizing reflective offline scribe:', apiErr?.message || apiErr);
+      parsed = generateLocalVoicePolish(speechText, mood);
+      modelUsed = 'reflective-offline-scribe';
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      parsed = generateLocalVoicePolish(speechText, mood);
     }
 
     return res.json({
       ...parsed,
-      modelUsed: result.modelUsed
+      modelUsed,
+      quotaDepleted: isQuotaDepleted
     });
   } catch (err: any) {
     console.error('Voice Reflection API Error:', err.message || err);
-    return res.status(500).json({
-      error: 'Failed to process voice reflection',
-      code: 'VOICE_REFLECTION_ERROR'
+    const fallback = generateLocalVoicePolish(req.body?.speechText || '', req.body?.mood);
+    return res.json({
+      ...fallback,
+      modelUsed: 'reflective-offline-scribe',
+      quotaDepleted: true
+    });
+  }
+});
+
+/**
+ * State of Mind & Emotional Quotient (EQ) Analyzer
+ * Analyzes reflection content to detect mood, category, EQ insights, and emotional tags
+ */
+app.post('/api/gemini/analyze-emotions', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const parseResult = analyzeEmotionsRequestSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: 'Invalid payload for emotion analysis',
+        details: parseResult.error.issues.map(e => e.message)
+      });
+    }
+
+    const { title, content } = parseResult.data;
+
+    // If practically empty, fallback to local default
+    if (!content.trim() && !title.trim()) {
+      const fallback = generateLocalEmotionAnalysis(title, content);
+      return res.json({
+        ...fallback,
+        modelUsed: 'reflective-offline-eq-engine',
+        quotaDepleted: false
+      });
+    }
+
+    const systemInstruction = `
+You are Reflecta's empathetic Emotional Intelligence and State-of-Mind Analyst.
+Analyze the user's journal reflection to identify their underlying state of mind and assess their emotional quotient (EQ).
+
+The 4 high-level state of mind categories are:
+1. "peaceful": Peaceful & Grounded (calm, peaceful, grateful)
+2. "reflective": Reflective & Inquiring (thoughtful, curious, energized, searching, vulnerable)
+3. "overload": Overload & Stress (overwhelmed, anxious, frustrated)
+4. "depleted": Low Energy & Depleted (exhausted, melancholy, disappointed, sorrow, disgusted)
+
+Instructions:
+- Determine the most fitting "category" from: "peaceful" | "reflective" | "overload" | "depleted".
+- Select the exact "primaryMood" from this allowed set:
+  ["calm", "grateful", "thoughtful", "energized", "curious", "peaceful", "searching", "overwhelmed", "disappointed", "sorrow", "disgusted", "anxious", "frustrated", "vulnerable", "exhausted", "melancholy"]
+- Provide 2 to 4 relevant "tags" representing the core emotions felt (e.g. ["calm", "thoughtful", "grateful", "vulnerable", "anxious", "curious"]). Tags MUST be specific emotions and MUST NOT be the 4 category names.
+- Provide "eqAnalysis":
+  - "emotionalQuotient": A concise label of their emotional intelligence facet (e.g. "Adaptive Self-Regulation", "Courageous Vulnerability", "Cultivated Gratitude", "High Affective Awareness").
+  - "tone": Brief description of their emotional tone (e.g. "Contemplative & grounded", "Raw yet honest", "Invigorated and curious").
+  - "mindfulObservation": A 1-2 sentence mindful observation celebrating their emotional awareness.
+`;
+
+    const emotionSchema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        category: { 
+          type: Type.STRING,
+          enum: ['peaceful', 'reflective', 'overload', 'depleted']
+        },
+        primaryMood: { 
+          type: Type.STRING,
+          enum: [
+            'calm', 'grateful', 'thoughtful', 'energized', 'curious',
+            'peaceful', 'searching', 'overwhelmed', 'disappointed',
+            'sorrow', 'disgusted', 'anxious', 'frustrated', 'vulnerable',
+            'exhausted', 'melancholy'
+          ]
+        },
+        tags: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING }
+        },
+        eqAnalysis: {
+          type: Type.OBJECT,
+          properties: {
+            emotionalQuotient: { type: Type.STRING },
+            tone: { type: Type.STRING },
+            mindfulObservation: { type: Type.STRING }
+          },
+          required: ['emotionalQuotient', 'tone', 'mindfulObservation']
+        }
+      },
+      required: ['category', 'primaryMood', 'tags', 'eqAnalysis']
+    };
+
+    let parsed: any = null;
+    let modelUsed = 'gemini-3.8-flash';
+    let isQuotaDepleted = false;
+
+    try {
+      const userText = `Reflection Title: ${title || 'Untitled'}\n\nReflection Content:\n${content.slice(0, 8000)}`;
+
+      const result = await generateContentWithFallback({
+        systemInstruction,
+        contents: [{ role: 'user', parts: [{ text: userText }] }],
+        responseSchema: emotionSchema,
+        responseMimeType: 'application/json',
+        temperature: 0.3
+      });
+
+      parsed = JSON.parse(result.text);
+      modelUsed = result.modelUsed;
+    } catch (apiErr: any) {
+      isQuotaDepleted = isQuotaOrPrepaymentError(apiErr);
+      console.warn('Gemini emotion analysis unavailable, using reflective offline EQ engine:', apiErr?.message || apiErr);
+      parsed = generateLocalEmotionAnalysis(title, content);
+      modelUsed = 'reflective-offline-eq-engine';
+    }
+
+    if (!parsed || !parsed.primaryMood || !parsed.category) {
+      parsed = generateLocalEmotionAnalysis(title, content);
+      modelUsed = 'reflective-offline-eq-engine';
+    }
+
+    return res.json({
+      ...parsed,
+      modelUsed,
+      quotaDepleted: isQuotaDepleted
+    });
+  } catch (err: any) {
+    console.error('Emotion Analysis API Error:', err.message || err);
+    const fallback = generateLocalEmotionAnalysis(req.body?.title, req.body?.content);
+    return res.json({
+      ...fallback,
+      modelUsed: 'reflective-offline-eq-engine',
+      quotaDepleted: true
     });
   }
 });

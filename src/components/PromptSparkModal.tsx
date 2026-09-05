@@ -92,12 +92,12 @@ export const PromptSparkModal: React.FC<PromptSparkModalProps> = ({
         <div className={`flex items-center justify-between pb-4 border-b ${isDark ? 'border-white/[0.08]' : 'border-black/[0.06]'}`}>
           <div className="flex items-center gap-3">
             <div className={`p-2.5 rounded-2xl border ${
-              isDark ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-amber-50 border-amber-200 text-amber-600'
+              isDark ? 'bg-teal-500/10 border-teal-500/20 text-teal-400' : 'bg-teal-50 border-teal-200 text-teal-700'
             }`}>
               <Sparkles className="w-5 h-5 animate-pulse" />
             </div>
             <div>
-              <span className={`text-[10px] font-mono uppercase tracking-wider ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+              <span className={`text-[10px] font-mono uppercase tracking-wider ${isDark ? 'text-teal-300' : 'text-teal-700 font-semibold'}`}>
                 Reflective Sparks
               </span>
               <h3 className={`font-serif text-2xl font-semibold ${isDark ? 'text-neutral-100' : 'text-neutral-900'}`}>
@@ -117,7 +117,7 @@ export const PromptSparkModal: React.FC<PromptSparkModalProps> = ({
               }`}
               title="Generate Fresh AI Sparks"
             >
-              <RefreshCw className={`w-4 h-4 ${isGenerating ? 'animate-spin text-amber-500' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${isGenerating ? 'animate-spin text-teal-500' : ''}`} />
             </button>
             <button
               onClick={onClose}
@@ -142,16 +142,16 @@ export const PromptSparkModal: React.FC<PromptSparkModalProps> = ({
               }}
               className={`group p-5 rounded-2xl border transition-all cursor-pointer space-y-2 backdrop-blur-xl ${
                 isDark
-                  ? 'bg-neutral-950/60 border-white/[0.08] hover:border-amber-500/40 hover:bg-neutral-950/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'
-                  : 'bg-white/80 border-black/[0.06] hover:border-amber-500/40 hover:bg-amber-50/30 shadow-2xs'
+                  ? 'bg-neutral-950/60 border-white/[0.08] hover:border-teal-500/40 hover:bg-neutral-950/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'
+                  : 'bg-white/80 border-black/[0.06] hover:border-teal-500/40 hover:bg-teal-50/30 shadow-2xs'
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className={`text-[10px] font-mono uppercase tracking-wider ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+                <span className={`text-[10px] font-mono uppercase tracking-wider ${isDark ? 'text-teal-300' : 'text-teal-700 font-medium'}`}>
                   {spark.category}
                 </span>
                 <span className={`text-xs transition-all flex items-center gap-1 font-medium ${
-                  isDark ? 'text-neutral-400 group-hover:text-amber-300' : 'text-neutral-500 group-hover:text-amber-700'
+                  isDark ? 'text-neutral-400 group-hover:text-teal-300' : 'text-neutral-500 group-hover:text-teal-700'
                 }`}>
                   <span>Write this</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
@@ -159,7 +159,7 @@ export const PromptSparkModal: React.FC<PromptSparkModalProps> = ({
               </div>
 
               <h4 className={`font-serif text-base font-medium transition-colors ${
-                isDark ? 'text-neutral-100 group-hover:text-amber-200' : 'text-neutral-900 group-hover:text-amber-800'
+                isDark ? 'text-neutral-100 group-hover:text-teal-200' : 'text-neutral-900 group-hover:text-teal-800'
               }`}>
                 {spark.title}
               </h4>

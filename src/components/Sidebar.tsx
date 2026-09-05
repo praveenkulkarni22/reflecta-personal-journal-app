@@ -49,14 +49,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       id: 'journal' as NavTab,
       label: 'Journal',
-      subtext: 'Daily reflections & prose',
+      subtext: 'Daily reflections',
       icon: BookOpen,
       badge: journalCount > 0 ? `${journalCount}` : undefined
     },
     {
       id: 'calendar' as NavTab,
       label: 'Memory Calendar',
-      subtext: 'Dates, events & milestones',
+      subtext: 'Dates & milestones',
       icon: CalendarIcon,
       badge: eventsCount > 0 ? `${eventsCount}` : undefined,
       isSpecial: true
@@ -64,26 +64,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       id: 'conversations' as NavTab,
       label: 'Reflect Dialogue',
-      subtext: 'Gemini Socratic inquiry',
+      subtext: 'Socratic inquiry',
       icon: MessageSquare
     },
     {
       id: 'archive' as NavTab,
       label: 'Volume Archive',
-      subtext: 'Historical vault records',
+      subtext: 'Historical vault',
       icon: Archive
     },
     {
       id: 'landscape' as NavTab,
       label: 'Inner Landscape',
-      subtext: 'Longitudinal mindspace themes',
+      subtext: 'Mindspace themes',
       icon: Compass,
       onClick: onOpenLandscape
     },
     {
       id: 'flipbook' as any,
       label: 'Flipbook Reader',
-      subtext: 'Contemplative book view',
+      subtext: 'Contemplative view',
       icon: BookMarked,
       onClick: onOpenFlipbook
     }
@@ -92,36 +92,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <aside
       className={`fixed top-0 left-0 bottom-0 z-40 transition-all duration-300 flex flex-col border-r backdrop-blur-2xl ${
-        isCollapsed ? 'w-[72px]' : 'w-72'
+        isCollapsed ? 'w-[64px]' : 'w-60'
       } ${
         isDark
           ? 'bg-neutral-950/90 border-white/[0.08] shadow-[10px_0_30px_rgba(0,0,0,0.5)]'
-          : 'bg-white/90 border-black/[0.06] shadow-[10px_0_30px_rgba(0,0,0,0.03)]'
+          : 'bg-[#fdfbf7]/95 border-stone-200/80 shadow-[10px_0_30px_rgba(0,0,0,0.04)]'
       }`}
     >
       {/* Brand Header */}
-      <div className={`p-4 flex items-center justify-between border-b ${
-        isDark ? 'border-neutral-900/80' : 'border-neutral-100'
+      <div className={`p-3.5 flex items-center justify-between border-b ${
+        isDark ? 'border-white/[0.08]' : 'border-stone-200/80'
       }`}>
         <div 
           onClick={() => setActiveTab('journal')}
-          className="flex items-center gap-3 cursor-pointer group select-none overflow-hidden"
+          className="flex items-center gap-2.5 cursor-pointer group select-none"
         >
-          {/* Exact Amber Monogram matching Landing Page */}
+          {/* Monogram with #67C3DE Highlight */}
           <motion.div 
             whileHover={{ scale: 1.05, rotate: -2 }}
             whileTap={{ scale: 0.95 }}
             id="sidebar-logo"
-            className={`relative flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 ${
+            className={`relative flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300 ${
               isDark
-                ? 'bg-gradient-to-br from-amber-500/20 via-neutral-900 to-neutral-950 border border-amber-500/30 shadow-[0_4px_16px_rgba(245,158,11,0.2),inset_0_1px_0_rgba(255,255,255,0.2)]'
-                : 'bg-gradient-to-br from-amber-50 via-white to-amber-100/60 border border-amber-500/30 shadow-[0_4px_14px_rgba(217,119,6,0.15),inset_0_1px_0_rgba(255,255,255,1)]'
+                ? 'bg-[#67C3DE]/15 border border-[#67C3DE]/50 shadow-[0_0_12px_rgba(103,195,222,0.25)]'
+                : 'bg-gradient-to-br from-[#67C3DE]/30 via-[#67C3DE]/15 to-white border border-[#67C3DE] shadow-[0_2px_8px_rgba(103,195,222,0.25)]'
             }`}
           >
-            <span className={`font-serif text-xl font-bold tracking-wider ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+            <span className={`font-serif text-lg font-bold tracking-wider ${
+              isDark ? 'text-[#67C3DE]' : 'text-[#083847]'
+            }`}>
               R
             </span>
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full animate-pulse shadow-md shadow-amber-400/50" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full animate-pulse bg-[#67C3DE] shadow-[0_0_8px_#67C3DE]" />
           </motion.div>
 
           {!isCollapsed && (
@@ -129,26 +131,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -10 }}
-              className="flex flex-col truncate"
+              className="flex flex-col min-w-0"
             >
-              <div className="flex items-center gap-2">
-                <span className={`font-serif text-lg font-medium tracking-tight ${
-                  isDark ? 'text-neutral-100 group-hover:text-amber-300' : 'text-neutral-900 group-hover:text-amber-600'
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className={`font-serif text-base font-bold tracking-tight whitespace-nowrap ${
+                  isDark ? 'text-[#67C3DE]' : 'text-[#083847] group-hover:text-[#0c4a60]'
                 }`}>
                   Reflecta
                 </span>
-                <span className={`px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase rounded-full border ${
-                  isDark
-                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                <span className={`px-1.5 py-0.5 text-[9px] font-mono tracking-wider uppercase rounded-full border whitespace-nowrap font-bold ${
+                  isDark 
+                    ? 'bg-[#67C3DE]/15 text-[#67C3DE] border-[#67C3DE]/40' 
+                    : 'bg-[#67C3DE]/20 text-[#083847] border-[#67C3DE]/60'
                 }`}>
                   Sanctuary
                 </span>
               </div>
-              <span className={`text-[11px] font-serif italic truncate ${
-                isDark ? 'text-neutral-400' : 'text-neutral-500'
+              {/* Responsive title in #67C3DE in dark mode and deep ocean tone in light mode */}
+              <span className={`text-xs font-bold select-none tracking-normal leading-tight mt-0.5 ${
+                isDark ? 'text-[#67C3DE]' : 'text-[#0c4a60]'
               }`}>
-                Mindful Vault & Journey
+                Mindful Vault and Journey
               </span>
             </motion.div>
           )}
@@ -159,19 +162,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
             title="Collapse Sidebar"
-            className={`p-1.5 rounded-lg border transition-colors ${
+            className={`p-1.5 rounded-lg border transition-colors cursor-pointer shrink-0 ${
               isDark 
-                ? 'bg-neutral-900 border-white/[0.08] text-neutral-400 hover:text-white hover:bg-neutral-800' 
-                : 'bg-neutral-100 border-black/[0.06] text-neutral-500 hover:text-black hover:bg-neutral-200'
+                ? 'border-white/[0.08] bg-neutral-900/40 text-[#67C3DE] hover:bg-[#67C3DE]/15' 
+                : 'border-stone-200 bg-white text-[#0c4a60] hover:bg-[#67C3DE]/20 hover:text-[#083847] hover:border-[#67C3DE]/60 shadow-2xs'
             }`}
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
 
       {/* Navigation Options List */}
-      <nav className="flex-1 px-3 py-3 space-y-1.5 overflow-y-auto overflow-x-hidden">
+      <nav className="flex-1 px-2.5 py-2.5 space-y-1.5 overflow-y-auto overflow-x-hidden">
         {navItems.map((item) => {
           const isActive = activeTab === item.id;
           const Icon = item.icon;
@@ -187,53 +190,65 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 }
               }}
               title={isCollapsed ? item.label : undefined}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all duration-200 text-left group cursor-pointer relative ${
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-medium transition-all duration-200 text-left group cursor-pointer relative ${
                 isActive
                   ? isDark
-                    ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_2px_12px_rgba(245,158,11,0.15)]'
-                    : 'bg-amber-50 text-amber-900 border border-amber-300 shadow-[0_2px_8px_rgba(217,119,6,0.1)]'
+                    ? 'bg-[#67C3DE]/15 text-[#67C3DE] border border-[#67C3DE]/50 shadow-[0_0_14px_rgba(103,195,222,0.18)] font-bold'
+                    : 'bg-[#67C3DE]/20 text-[#083847] border border-[#67C3DE]/70 shadow-[0_2px_10px_rgba(103,195,222,0.22)] font-bold'
                   : isDark
-                  ? 'text-neutral-400 hover:text-neutral-100 hover:bg-neutral-900/80 border border-transparent'
-                  : 'text-neutral-600 hover:text-neutral-950 hover:bg-neutral-100 border border-transparent'
+                    ? 'text-[#67C3DE]/70 hover:text-[#67C3DE] hover:bg-[#67C3DE]/10 hover:border-[#67C3DE]/25 border border-transparent font-medium'
+                    : 'text-[#0c4a60]/80 hover:text-[#083847] hover:bg-[#67C3DE]/15 hover:border-[#67C3DE]/40 border border-transparent font-medium'
               }`}
             >
-              <div className={`p-1 rounded-lg transition-colors flex-shrink-0 ${
+              <div className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
                 isActive
-                  ? isDark ? 'text-amber-400' : 'text-amber-700'
-                  : isDark ? 'text-neutral-400 group-hover:text-neutral-200' : 'text-neutral-500 group-hover:text-neutral-800'
+                  ? isDark
+                    ? 'bg-[#67C3DE]/25 text-[#67C3DE] border border-[#67C3DE]/40 shadow-xs'
+                    : 'bg-[#67C3DE] text-[#083847] border border-[#67C3DE] shadow-xs'
+                  : isDark
+                    ? 'text-[#67C3DE]/80 group-hover:text-[#67C3DE]'
+                    : 'text-[#0c4a60] group-hover:text-[#083847]'
               }`}>
                 <Icon className="w-4 h-4" />
               </div>
 
               {!isCollapsed && (
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <span className="truncate font-medium">{item.label}</span>
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className={`font-bold whitespace-nowrap ${
+                      isDark ? 'text-[#67C3DE]' : 'text-[#083847]'
+                    }`}>
+                      {item.label}
+                    </span>
                     {item.badge && (
-                      <span className={`px-1.5 py-0.5 text-[10px] font-mono rounded-full ${
+                      <span className={`px-1.5 py-0.5 text-[9px] font-mono rounded-full shrink-0 whitespace-nowrap font-bold ${
                         isActive
-                          ? isDark ? 'bg-amber-500/30 text-amber-200' : 'bg-amber-200 text-amber-900'
-                          : isDark ? 'bg-neutral-800 text-neutral-400' : 'bg-neutral-200 text-neutral-600'
+                          ? isDark
+                            ? 'bg-[#67C3DE] text-neutral-950 shadow-xs'
+                            : 'bg-[#67C3DE] text-[#083847] shadow-xs'
+                          : isDark
+                            ? 'bg-[#67C3DE]/15 text-[#67C3DE] border border-[#67C3DE]/30'
+                            : 'bg-[#67C3DE]/20 text-[#083847] border border-[#67C3DE]/50'
                       }`}>
                         {item.badge}
                       </span>
                     )}
                   </div>
-                  <p className={`text-[10px] truncate ${
+                  <p className={`text-[10px] leading-tight truncate mt-0.5 ${
                     isActive 
-                      ? isDark ? 'text-amber-400/80' : 'text-amber-800/80' 
-                      : isDark ? 'text-neutral-500' : 'text-neutral-400'
+                      ? isDark ? 'text-[#67C3DE] font-semibold' : 'text-[#0c4a60] font-semibold'
+                      : isDark ? 'text-[#67C3DE]/70 group-hover:text-[#67C3DE]/90' : 'text-[#0c4a60]/75 group-hover:text-[#083847]'
                   }`}>
                     {item.subtext}
                   </p>
                 </div>
               )}
 
-              {/* Active Indicator Bar on left */}
+              {/* Active Indicator Bar on left using #67C3DE */}
               {isActive && (
                 <motion.div
                   layoutId="activeNavIndicator"
-                  className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-amber-500"
+                  className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full bg-[#67C3DE] shadow-[0_0_8px_#67C3DE]"
                 />
               )}
             </button>
@@ -243,36 +258,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Expand Toggle when collapsed */}
       {isCollapsed && (
-        <div className="p-3 border-t flex justify-center">
+        <div className={`p-2.5 border-t flex justify-center ${
+          isDark ? 'border-white/[0.08]' : 'border-stone-200/80'
+        }`}>
           <button
             onClick={() => setIsCollapsed(false)}
             title="Expand Sidebar"
-            className={`p-2 rounded-lg border transition-colors ${
+            className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
               isDark 
-                ? 'bg-neutral-900 border-white/[0.08] text-neutral-400 hover:text-white hover:bg-neutral-800' 
-                : 'bg-neutral-100 border-black/[0.06] text-neutral-500 hover:text-black hover:bg-neutral-200'
+                ? 'border-white/[0.08] bg-neutral-900/40 text-[#67C3DE] hover:bg-[#67C3DE]/15' 
+                : 'border-stone-200 bg-white text-[#0c4a60] hover:bg-[#67C3DE]/20 hover:text-[#083847] hover:border-[#67C3DE]/60 shadow-2xs'
             }`}
           >
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
       {/* Bottom Vault Status Footer */}
       {!isCollapsed && (
-        <div className={`p-3.5 m-3 rounded-2xl border ${
+        <div className={`p-3 m-2.5 rounded-xl border shadow-xs ${
           isDark 
-            ? 'bg-neutral-900/60 border-white/[0.06]' 
-            : 'bg-neutral-50 border-black/[0.05]'
+            ? 'bg-neutral-900/60 border-white/[0.08]' 
+            : 'bg-[#67C3DE]/12 border-[#67C3DE]/40 shadow-2xs'
         }`}>
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-            <span className="text-[11px] font-medium truncate">Private Encrypted Vault</span>
+          <div className="flex items-center gap-1.5">
+            <ShieldCheck className={`w-4 h-4 flex-shrink-0 ${
+              isDark ? 'text-[#67C3DE]' : 'text-[#083847]'
+            }`} />
+            <span className={`text-[11px] font-bold leading-snug ${
+              isDark ? 'text-[#67C3DE]' : 'text-[#083847]'
+            }`}>
+              Private Encrypted Vault
+            </span>
           </div>
-          <p className={`text-[10px] mt-1 leading-relaxed ${
-            isDark ? 'text-neutral-500' : 'text-neutral-400'
+          <p className={`text-[10px] mt-1 leading-relaxed font-medium ${
+            isDark ? 'text-[#67C3DE]/80' : 'text-[#0c4a60]'
           }`}>
-            Your thoughts and calendar reminders are bound to your secure Google UID.
+            Reflections & calendar are securely bound to your Google account.
           </p>
         </div>
       )}

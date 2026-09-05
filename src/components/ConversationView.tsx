@@ -35,7 +35,7 @@ interface ConversationViewProps {
 const CONVERSATION_MODES = [
   { id: 'reflect', label: 'Empathetic Sanctuary', icon: Feather, color: 'text-emerald-500' },
   { id: 'socratic', label: 'Socratic Inquiry', icon: Brain, color: 'text-purple-500' },
-  { id: 'brainstorm', label: 'Creative Divergence', icon: Lightbulb, color: 'text-amber-500' },
+  { id: 'brainstorm', label: 'Creative Divergence', icon: Lightbulb, color: 'text-teal-400' },
   { id: 'unpack', label: 'Unpack Friction', icon: HelpCircle, color: 'text-cyan-500' },
 ];
 

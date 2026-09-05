@@ -157,6 +157,8 @@ export type CalendarEventCategory =
   | 'reminder'
   | 'custom';
 
+export type EventRecurrence = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+
 export interface CalendarEvent {
   id: string;
   userId: string;
@@ -167,6 +169,7 @@ export interface CalendarEvent {
   notes?: string;
   isCompleted?: boolean;
   priority?: 'normal' | 'important' | 'celebration';
+  recurrence?: EventRecurrence;
   createdAt: string;
   updatedAt: string;
 }

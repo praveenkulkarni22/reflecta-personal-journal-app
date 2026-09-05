@@ -25,9 +25,10 @@ import {
   Feather,
   ArrowRight,
   Filter,
-  Check
+  Check,
+  Repeat
 } from 'lucide-react';
-import { JournalEntry, CalendarEvent, CalendarEventCategory } from '../types';
+import { JournalEntry, CalendarEvent, CalendarEventCategory, EventRecurrence } from '../types';
 import { useTheme } from '../context/ThemeContext';
 
 interface CalendarViewProps {
@@ -72,13 +73,13 @@ const EVENT_PRESETS: EventPreset[] = [
     icon: Heart,
     defaultTitle: "Anniversary Celebration",
     defaultPriority: 'celebration',
-    color: 'text-amber-500',
-    bgLight: 'bg-amber-50 border-amber-200 text-amber-800',
-    bgDark: 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+    color: 'text-rose-500',
+    bgLight: 'bg-rose-50 border-rose-200 text-rose-800',
+    bgDark: 'bg-rose-500/15 border-rose-500/30 text-rose-300'
   },
   {
     category: 'graduation',
-    label: "Graduation Day",
+    label: "Graduation",
     sublabel: "Academic milestone & honors",
     icon: GraduationCap,
     defaultTitle: "Graduation Ceremony",
@@ -100,7 +101,7 @@ const EVENT_PRESETS: EventPreset[] = [
   },
   {
     category: 'dining',
-    label: "Lunch / Dinner",
+    label: "Dining",
     sublabel: "Meal planning & gatherings",
     icon: UtensilsCrossed,
     defaultTitle: "Dinner Gathering",
@@ -111,7 +112,7 @@ const EVENT_PRESETS: EventPreset[] = [
   },
   {
     category: 'wellness',
-    label: "Health & Doctor",
+    label: "Wellness",
     sublabel: "Wellness & medical visit",
     icon: Stethoscope,
     defaultTitle: "Health Checkup",
@@ -122,7 +123,7 @@ const EVENT_PRESETS: EventPreset[] = [
   },
   {
     category: 'travel',
-    label: "Travel / Trip",
+    label: "Travel",
     sublabel: "Journey & getaways",
     icon: Plane,
     defaultTitle: "Travel Departure",
@@ -132,17 +133,47 @@ const EVENT_PRESETS: EventPreset[] = [
     bgDark: 'bg-sky-500/15 border-sky-500/30 text-sky-300'
   },
   {
-    category: 'reminder',
-    label: "Custom Reminder",
+    category: 'custom',
+    label: "Custom",
     sublabel: "Contemplative to-do & note",
     icon: Bell,
-    defaultTitle: "Important Reminder",
+    defaultTitle: "Personal Milestone",
     defaultPriority: 'important',
-    color: 'text-amber-500',
-    bgLight: 'bg-amber-50 border-amber-200 text-amber-800',
-    bgDark: 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+    color: 'text-teal-600 dark:text-teal-400',
+    bgLight: 'bg-teal-50 border-teal-200 text-teal-800',
+    bgDark: 'bg-teal-500/15 border-teal-500/30 text-teal-300'
   }
 ];
+
+export function isEventOnDate(ev: CalendarEvent, targetDateStr: string): boolean {
+  if (!ev.date) return false;
+  const recurrence = ev.recurrence || 'none';
+  if (recurrence === 'none') {
+    return ev.date === targetDateStr;
+  }
+  // Recurring events only trigger on or after their starting date
+  if (targetDateStr < ev.date) {
+    return false;
+  }
+  if (recurrence === 'daily') {
+    return true;
+  }
+  const [evY, evM, evD] = ev.date.split('-').map(Number);
+  const [tY, tM, tD] = targetDateStr.split('-').map(Number);
+  const evDate = new Date(evY, evM - 1, evD);
+  const targetDate = new Date(tY, tM - 1, tD);
+
+  if (recurrence === 'weekly') {
+    return evDate.getDay() === targetDate.getDay();
+  }
+  if (recurrence === 'monthly') {
+    return evD === tD;
+  }
+  if (recurrence === 'yearly') {
+    return evM === tM && evD === tD;
+  }
+  return ev.date === targetDateStr;
+}
 
 function getCategoryIcon(cat: CalendarEventCategory) {
   const preset = EVENT_PRESETS.find(p => p.category === cat);
@@ -153,8 +184,8 @@ function getCategoryStyles(cat: CalendarEventCategory, isDark: boolean) {
   const preset = EVENT_PRESETS.find(p => p.category === cat);
   if (!preset) {
     return isDark 
-      ? 'bg-amber-500/15 border-amber-500/30 text-amber-300' 
-      : 'bg-amber-50 border-amber-200 text-amber-800';
+      ? 'bg-teal-500/15 border-teal-500/30 text-teal-300' 
+      : 'bg-teal-50 border-teal-200 text-teal-800';
   }
   return isDark ? preset.bgDark : preset.bgLight;
 }
@@ -201,9 +232,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [eventNotes, setEventNotes] = useState('');
   const [eventPriority, setEventPriority] = useState<'normal' | 'important' | 'celebration'>('normal');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeDetailTab, setActiveDetailTab] = useState<'reflections' | 'milestones'>('reflections');
 
   // Filter state for upcoming events
   const [eventFilter, setEventFilter] = useState<'all' | CalendarEventCategory>('all');
+  const [eventRecurrence, setEventRecurrence] = useState<EventRecurrence>('none');
 
   // Map entries by date key (YYYY-MM-DD)
   const entriesByDate = useMemo(() => {
@@ -219,19 +252,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     }
     return map;
   }, [entries]);
-
-  // Map events by date key (YYYY-MM-DD)
-  const eventsByDate = useMemo(() => {
-    const map = new Map<string, CalendarEvent[]>();
-    for (const ev of events) {
-      if (ev.date) {
-        const list = map.get(ev.date) || [];
-        list.push(ev);
-        map.set(ev.date, list);
-      }
-    }
-    return map;
-  }, [events]);
 
   // Generate calendar grid days
   const calendarDays = useMemo(() => {
@@ -261,7 +281,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         isCurrentMonth: false,
         isToday: key === todayStr,
         journalEntries: entriesByDate.get(key) || [],
-        dayEvents: eventsByDate.get(key) || []
+        dayEvents: events.filter(ev => isEventOnDate(ev, key))
       });
     }
 
@@ -275,7 +295,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         isCurrentMonth: true,
         isToday: key === todayStr,
         journalEntries: entriesByDate.get(key) || [],
-        dayEvents: eventsByDate.get(key) || []
+        dayEvents: events.filter(ev => isEventOnDate(ev, key))
       });
     }
 
@@ -292,12 +312,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         isCurrentMonth: false,
         isToday: key === todayStr,
         journalEntries: entriesByDate.get(key) || [],
-        dayEvents: eventsByDate.get(key) || []
+        dayEvents: events.filter(ev => isEventOnDate(ev, key))
       });
     }
 
     return days;
-  }, [currentYear, currentMonth, todayStr, entriesByDate, eventsByDate]);
+  }, [currentYear, currentMonth, todayStr, entriesByDate, events]);
 
   // Selected date's content
   const selectedEntries = useMemo(() => {
@@ -305,8 +325,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   }, [entriesByDate, selectedDateStr]);
 
   const selectedEvents = useMemo(() => {
-    return eventsByDate.get(selectedDateStr) || [];
-  }, [eventsByDate, selectedDateStr]);
+    return events.filter(ev => isEventOnDate(ev, selectedDateStr));
+  }, [events, selectedDateStr]);
 
   // Formatted selected date label
   const formattedSelectedDate = useMemo(() => {
@@ -356,6 +376,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setEventPriority(preset.defaultPriority);
     setEventTime('');
     setEventNotes('');
+    setEventRecurrence(
+      preset.category === 'birthday' || preset.category === 'anniversary'
+        ? 'yearly'
+        : 'none'
+    );
     setIsEventModalOpen(true);
   };
 
@@ -373,12 +398,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         category: selectedCategory,
         notes: eventNotes.trim() || undefined,
         priority: eventPriority,
+        recurrence: eventRecurrence,
         isCompleted: false
       });
       setIsEventModalOpen(false);
       setEventTitle('');
       setEventNotes('');
       setEventTime('');
+      setEventRecurrence('none');
     } catch (err) {
       console.error('Failed to create event:', err);
     } finally {
@@ -387,502 +414,544 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <div className="relative flex-1 flex flex-col min-h-0 w-full animate-in fade-in duration-300">
       
-      {/* Top Banner: Sanctuary Calendar Title & Month Navigation */}
-      <div className={`p-6 rounded-3xl border backdrop-blur-2xl transition-all duration-300 ${
-        isDark
-          ? 'bg-neutral-900/70 border-white/[0.08] shadow-[0_12px_30px_-10px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.1)]'
-          : 'bg-white/80 border-black/[0.06] shadow-[0_12px_30px_-10px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,1)]'
+      {/* SPIRAL NOTEBOOK PAPER PAGE */}
+      <div className={`relative flex-1 p-3.5 sm:p-5 sm:pl-8 sm:pr-6 transition-colors duration-200 flex flex-col min-h-0 w-full max-w-full overflow-hidden ${
+        isDark 
+          ? 'bg-[#18181b] text-neutral-100' 
+          : 'bg-[#fdfbf7] text-neutral-900'
       }`}>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className={`px-2.5 py-0.5 text-[10px] font-mono tracking-wider uppercase rounded-full border ${
-                isDark
-                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                  : 'bg-amber-50 text-amber-800 border-amber-200'
-              }`}>
-                Time Sanctuary
-              </span>
-              <span className={`text-xs ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                {entries.length} reflections recorded • {events.length} milestones planned
-              </span>
-            </div>
-            <h1 className={`font-serif text-2xl sm:text-3xl font-medium tracking-tight mt-1 ${
-              isDark ? 'text-neutral-50' : 'text-neutral-900'
-            }`}>
-              Memory Calendar
-            </h1>
-            <p className={`text-xs mt-0.5 ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-              Navigate your journey by date, highlight written memories, and organize meaningful milestones.
-            </p>
-          </div>
+            
+            {/* Perforated tear line on the left of the page */}
+            <div className={`absolute top-0 bottom-0 left-0 w-px border-r-2 border-dashed ${
+              isDark ? 'border-neutral-700/60' : 'border-stone-300/80'
+            }`} />
 
-          {/* Month & Year Controller */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleJumpToToday}
-              className={`px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${
-                isDark
-                  ? 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border-white/[0.08]'
-                  : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-700 border-black/[0.06]'
-              }`}
-            >
-              Today
-            </button>
+            {/* Red / Coral Classic Notebook Margin Rule Line */}
+            <div className={`absolute top-0 bottom-0 left-3 sm:left-5 w-px ${
+              isDark ? 'bg-rose-500/20' : 'bg-rose-400/40'
+            }`} />
 
-            <div className={`flex items-center p-1 rounded-xl border ${
-              isDark ? 'bg-neutral-950 border-white/[0.08]' : 'bg-neutral-100/80 border-black/[0.06]'
-            }`}>
-              <button
-                onClick={handlePrevMonth}
-                title="Previous Month"
-                className={`p-1.5 rounded-lg transition-colors ${
-                  isDark ? 'hover:bg-neutral-800 text-neutral-300' : 'hover:bg-white text-neutral-700'
-                }`}
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
+            {/* Ruled lines texture */}
+            <div 
+              className="absolute inset-0 pointer-events-none opacity-40 dark:opacity-20"
+              style={{
+                backgroundImage: isDark
+                  ? 'repeating-linear-gradient(to bottom, transparent, transparent 29px, rgba(255,255,255,0.06) 29px, rgba(255,255,255,0.06) 30px)'
+                  : 'repeating-linear-gradient(to bottom, transparent, transparent 29px, rgba(0,0,0,0.06) 29px, rgba(0,0,0,0.06) 30px)'
+              }}
+            />
 
-              <span className="px-3 text-xs sm:text-sm font-serif font-medium tracking-wide min-w-[130px] text-center">
-                {MONTH_NAMES[currentMonth]} {currentYear}
-              </span>
-
-              <button
-                onClick={handleNextMonth}
-                title="Next Month"
-                className={`p-1.5 rounded-lg transition-colors ${
-                  isDark ? 'hover:bg-neutral-800 text-neutral-300' : 'hover:bg-white text-neutral-700'
-                }`}
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Access Menu for Common Milestones & Events */}
-        <div className="mt-5 pt-4 border-t border-dashed border-neutral-200/40 dark:border-neutral-800/60">
-          <div className="flex items-center justify-between mb-2.5">
-            <span className={`text-[11px] font-mono tracking-wider uppercase flex items-center gap-1.5 ${
-              isDark ? 'text-amber-400/90' : 'text-amber-800'
-            }`}>
-              <Sparkles className="w-3 h-3 text-amber-500" />
-              Easy Access Quick Presets — Click to add for selected date ({selectedDateStr}):
-            </span>
-            <span className="text-[10px] text-neutral-400">
-              One-click milestone scheduler
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-            {EVENT_PRESETS.map((preset) => {
-              const Icon = preset.icon;
-              return (
-                <motion.button
-                  key={preset.category}
-                  whileHover={{ scale: 1.03, y: -2 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => handleOpenPreset(preset)}
-                  className={`flex flex-col items-center text-center p-2.5 rounded-2xl border transition-all cursor-pointer ${
-                    isDark
-                      ? 'bg-neutral-900/90 hover:bg-neutral-800 border-white/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
-                      : 'bg-white hover:bg-neutral-50 border-black/[0.06] shadow-sm'
-                  }`}
-                >
-                  <div className={`p-2 rounded-xl mb-1.5 ${
-                    isDark ? 'bg-neutral-800' : 'bg-neutral-100'
-                  }`}>
-                    <Icon className={`w-4 h-4 ${preset.color}`} />
-                  </div>
-                  <span className="text-xs font-medium leading-tight truncate w-full">
-                    {preset.label}
-                  </span>
-                  <span className={`text-[9px] leading-tight truncate w-full mt-0.5 ${
-                    isDark ? 'text-neutral-500' : 'text-neutral-400'
-                  }`}>
-                    {preset.sublabel}
-                  </span>
-                </motion.button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Main Dual Pane: Calendar Grid on Left, Selected Date Workspace on Right */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        
-        {/* Left Pane: Interactive Month Calendar Grid */}
-        <div className={`lg:col-span-8 p-5 sm:p-6 rounded-3xl border backdrop-blur-2xl transition-all duration-300 ${
-          isDark
-            ? 'bg-neutral-900/70 border-white/[0.08] shadow-[0_12px_30px_-10px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.1)]'
-            : 'bg-white/80 border-black/[0.06] shadow-[0_12px_30px_-10px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,1)]'
-        }`}>
-          {/* Weekday Labels */}
-          <div className="grid grid-cols-7 gap-1.5 sm:gap-2 text-center mb-2">
-            {WEEKDAY_NAMES.map((name) => (
-              <div
-                key={name}
-                className={`py-1.5 text-xs font-mono font-medium uppercase tracking-wider ${
-                  name === 'Sun' || name === 'Sat'
-                    ? isDark ? 'text-amber-400/70' : 'text-amber-700'
-                    : isDark ? 'text-neutral-400' : 'text-neutral-500'
-                }`}
-              >
-                {name}
-              </div>
-            ))}
-          </div>
-
-          {/* Day Cells Grid */}
-          <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
-            {calendarDays.map((cell) => {
-              const isSelected = cell.dateStr === selectedDateStr;
-              const hasJournal = cell.journalEntries.length > 0;
-              const hasEvents = cell.dayEvents.length > 0;
-
-              return (
-                <button
-                  key={cell.dateStr}
-                  onClick={() => setSelectedDateStr(cell.dateStr)}
-                  className={`min-h-[80px] sm:min-h-[96px] p-2 rounded-2xl flex flex-col justify-between text-left transition-all duration-200 relative group cursor-pointer border ${
-                    isSelected
-                      ? isDark
-                        ? 'bg-amber-500/15 border-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.2)] ring-1 ring-amber-500/50'
-                        : 'bg-amber-50/90 border-amber-400 shadow-[0_0_16px_rgba(217,119,6,0.15)] ring-1 ring-amber-400'
-                      : hasJournal
-                      ? isDark
-                        ? 'bg-neutral-900/90 hover:bg-neutral-800/90 border-amber-500/20'
-                        : 'bg-amber-50/30 hover:bg-amber-50/70 border-amber-500/20'
-                      : cell.isCurrentMonth
-                      ? isDark
-                        ? 'bg-neutral-900/50 hover:bg-neutral-800/60 border-white/[0.04]'
-                        : 'bg-white/60 hover:bg-white border-black/[0.04]'
-                      : isDark
-                      ? 'bg-neutral-950/40 hover:bg-neutral-900/40 border-transparent opacity-40'
-                      : 'bg-neutral-100/40 hover:bg-neutral-100/70 border-transparent opacity-40'
-                  }`}
-                >
-                  {/* Top Bar: Day Number & Today indicator */}
-                  <div className="flex items-center justify-between w-full">
-                    <span className={`text-xs font-mono font-medium rounded-full w-6 h-6 flex items-center justify-center ${
-                      cell.isToday
-                        ? 'bg-amber-500 text-neutral-950 font-bold shadow-sm'
-                        : isSelected
-                        ? isDark ? 'text-amber-300 font-bold' : 'text-amber-900 font-bold'
-                        : cell.isCurrentMonth
-                        ? isDark ? 'text-neutral-200' : 'text-neutral-800'
-                        : isDark ? 'text-neutral-600' : 'text-neutral-400'
-                    }`}>
-                      {cell.dayNumber}
-                    </span>
-
-                    {/* Journal Indicator Badge / Marker */}
-                    {hasJournal && (
-                      <span 
-                        title={`${cell.journalEntries.length} reflection(s) written`}
-                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-mono border ${
-                          isDark
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                            : 'bg-amber-100 text-amber-800 border-amber-300'
-                        }`}
-                      >
-                        <BookOpen className="w-2.5 h-2.5 text-amber-500" />
-                        <span>{cell.journalEntries.length}</span>
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Bottom: Events / Reminders preview pills */}
-                  <div className="w-full space-y-1 mt-1">
-                    {cell.dayEvents.slice(0, 2).map((ev) => {
-                      const Icon = getCategoryIcon(ev.category);
-                      return (
-                        <div
-                          key={ev.id}
-                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] truncate font-medium border ${getCategoryStyles(ev.category, isDark)} ${
-                            ev.isCompleted ? 'line-through opacity-60' : ''
-                          }`}
-                        >
-                          <Icon className="w-2.5 h-2.5 flex-shrink-0" />
-                          <span className="truncate">{ev.title}</span>
-                        </div>
-                      );
-                    })}
-
-                    {cell.dayEvents.length > 2 && (
-                      <span className={`text-[9px] block font-mono pl-1 ${
-                        isDark ? 'text-neutral-400' : 'text-neutral-500'
-                      }`}>
-                        +{cell.dayEvents.length - 2} more
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Glowing Bottom Highlight for active Journal Days */}
-                  {hasJournal && (
-                    <div className="absolute bottom-1 left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-amber-500/60 to-transparent rounded-full" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Legend Strip */}
-          <div className="mt-4 pt-3 border-t border-neutral-200/40 dark:border-neutral-800/60 flex flex-wrap items-center justify-between gap-3 text-[11px]">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-sm" />
-                <span className={isDark ? 'text-neutral-300' : 'text-neutral-700'}>Today</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500/30 border border-amber-500" />
-                <span className={isDark ? 'text-neutral-300' : 'text-neutral-700'}>Reflection Written</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500/40 border border-rose-500" />
-                <span className={isDark ? 'text-neutral-300' : 'text-neutral-700'}>Birthday / Milestone</span>
-              </div>
-            </div>
-
-            <span className={`italic ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-              Click any date to view reflections or add entries & reminders.
-            </span>
-          </div>
-        </div>
-
-        {/* Right Pane: Selected Date Detail & Action Workspace */}
-        <div className="lg:col-span-4 space-y-4">
-          
-          {/* Selected Date Card */}
-          <div className={`p-5 rounded-3xl border backdrop-blur-2xl transition-all duration-300 ${
-            isDark
-              ? 'bg-neutral-900/80 border-white/[0.08] shadow-[0_12px_30px_-10px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.1)]'
-              : 'bg-white/90 border-black/[0.06] shadow-[0_12px_30px_-10px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,1)]'
-          }`}>
-            <div className="flex items-start justify-between">
-              <div>
-                <span className={`text-[10px] font-mono tracking-wider uppercase block ${
-                  isDark ? 'text-amber-400' : 'text-amber-700'
+            {/* NOTEBOOK TOP ROW: Title, Month Navigator & Header Actions (shrink-0) */}
+            <div className="relative z-10 flex flex-wrap items-center justify-between gap-2.5 mb-2 pb-2 border-b border-black/[0.06] dark:border-white/[0.08] shrink-0">
+              
+              {/* Left: Sanctuary Badge & Title */}
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-0.5 text-[9px] font-mono tracking-wider uppercase rounded-full border ${
+                  isDark
+                    ? 'bg-teal-500/10 text-teal-300 border-teal-500/20'
+                    : 'bg-teal-50 text-teal-800 border-teal-200'
                 }`}>
-                  Selected Calendar Date
+                  Time Sanctuary
                 </span>
-                <h2 className={`font-serif text-lg sm:text-xl font-medium tracking-tight mt-0.5 ${
+                <h1 className={`font-serif text-lg sm:text-xl font-medium tracking-tight ${
                   isDark ? 'text-neutral-50' : 'text-neutral-900'
                 }`}>
-                  {formattedSelectedDate}
-                </h2>
-              </div>
-
-              {selectedDateStr === todayStr && (
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono uppercase font-semibold ${
-                  isDark ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-amber-100 text-amber-900 border border-amber-300'
-                }`}>
-                  Today
+                  Memory Calendar
+                </h1>
+                <span className={`hidden md:inline-flex text-[11px] font-mono ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                  • {entries.length} reflections • {events.length} milestones
                 </span>
-              )}
-            </div>
-
-            {/* Main Action 1: Add Journal Entry for this Date */}
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => onAddEntryForDate(selectedDateStr)}
-              id="calendar-add-journal-btn"
-              className={`w-full mt-4 flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl font-medium text-xs shadow-md transition-all cursor-pointer ${
-                isDark
-                  ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-neutral-950 hover:from-amber-400 hover:to-amber-500 shadow-amber-500/20'
-                  : 'bg-gradient-to-r from-amber-600 to-amber-700 text-white hover:from-amber-500 hover:to-amber-600 shadow-amber-600/20'
-              }`}
-            >
-              <Feather className="w-3.5 h-3.5" />
-              <span>Write Reflection for this Date</span>
-            </motion.button>
-
-            {/* Main Action 2: Add Milestone / Event */}
-            <button
-              onClick={() => {
-                setSelectedCategory('birthday');
-                setEventTitle('');
-                setEventTime('');
-                setEventNotes('');
-                setIsEventModalOpen(true);
-              }}
-              className={`w-full mt-2 flex items-center justify-center gap-2 py-2 px-4 rounded-2xl font-medium text-xs border transition-all cursor-pointer ${
-                isDark
-                  ? 'bg-neutral-800/80 hover:bg-neutral-800 text-neutral-200 border-white/[0.08]'
-                  : 'bg-neutral-100 hover:bg-neutral-200/80 text-neutral-800 border-black/[0.06]'
-              }`}
-            >
-              <Plus className="w-3.5 h-3.5 text-amber-500" />
-              <span>Schedule Event or Reminder</span>
-            </button>
-          </div>
-
-          {/* Reflections on this Date */}
-          <div className={`p-5 rounded-3xl border backdrop-blur-2xl transition-all duration-300 ${
-            isDark
-              ? 'bg-neutral-900/80 border-white/[0.08]'
-              : 'bg-white/90 border-black/[0.06]'
-          }`}>
-            <div className="flex items-center justify-between mb-3">
-              <span className={`text-xs font-semibold flex items-center gap-1.5 ${
-                isDark ? 'text-neutral-200' : 'text-neutral-800'
-              }`}>
-                <BookOpen className="w-3.5 h-3.5 text-amber-500" />
-                Journal Entries ({selectedEntries.length})
-              </span>
-            </div>
-
-            {selectedEntries.length === 0 ? (
-              <div className={`p-4 rounded-2xl border text-center ${
-                isDark ? 'bg-neutral-950/40 border-neutral-800/60' : 'bg-neutral-50 border-neutral-200/60'
-              }`}>
-                <p className={`text-xs ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                  No reflection recorded for this date yet.
-                </p>
-                <button
-                  onClick={() => onAddEntryForDate(selectedDateStr)}
-                  className="mt-2 text-xs text-amber-500 hover:underline font-medium inline-flex items-center gap-1"
-                >
-                  Start writing now <ArrowRight className="w-3 h-3" />
-                </button>
               </div>
-            ) : (
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                {selectedEntries.map((entry) => (
-                  <div
-                    key={entry.id}
-                    onClick={() => onOpenEntry(entry)}
-                    className={`p-3 rounded-2xl border transition-all cursor-pointer group ${
-                      isDark
-                        ? 'bg-neutral-950/60 hover:bg-neutral-800/60 border-white/[0.06]'
-                        : 'bg-white hover:bg-neutral-50 border-black/[0.05] shadow-xs'
+
+              {/* Middle: Month & Year Navigator */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleJumpToToday}
+                  className={`px-2.5 py-1 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
+                    isDark
+                      ? 'bg-neutral-900 hover:bg-neutral-800 text-neutral-200 border-neutral-700'
+                      : 'bg-white hover:bg-stone-100 text-neutral-700 border-stone-300 shadow-2xs'
+                  }`}
+                >
+                  Today
+                </button>
+
+                <div className={`flex items-center p-0.5 rounded-lg border ${
+                  isDark ? 'bg-neutral-900 border-neutral-700' : 'bg-white border-stone-300 shadow-2xs'
+                }`}>
+                  <button
+                    type="button"
+                    onClick={handlePrevMonth}
+                    title="Previous Month"
+                    className={`p-1 rounded-md transition-colors cursor-pointer ${
+                      isDark ? 'hover:bg-neutral-800 text-neutral-300' : 'hover:bg-stone-100 text-neutral-700'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-medium truncate group-hover:text-amber-500 transition-colors">
-                        {entry.title || 'Untitled Reflection'}
-                      </h4>
-                      {entry.mood && (
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-neutral-500/10 text-neutral-400">
-                          {entry.mood}
-                        </span>
-                      )}
-                    </div>
-                    <p className={`text-[11px] line-clamp-2 mt-1 ${
-                      isDark ? 'text-neutral-400' : 'text-neutral-500'
-                    }`}>
-                      {entry.content}
-                    </p>
-                    <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-neutral-500/10 text-[10px] text-neutral-400 font-mono">
-                      <span>{entry.wordCount} words</span>
-                      <span className="text-amber-500 group-hover:underline">Open in Editor →</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
 
-          {/* Events & Reminders on this Date */}
-          <div className={`p-5 rounded-3xl border backdrop-blur-2xl transition-all duration-300 ${
-            isDark
-              ? 'bg-neutral-900/80 border-white/[0.08]'
-              : 'bg-white/90 border-black/[0.06]'
-          }`}>
-            <div className="flex items-center justify-between mb-3">
-              <span className={`text-xs font-semibold flex items-center gap-1.5 ${
-                isDark ? 'text-neutral-200' : 'text-neutral-800'
-              }`}>
-                <Bell className="w-3.5 h-3.5 text-amber-500" />
-                Scheduled Milestones & Reminders ({selectedEvents.length})
-              </span>
+                  <span className="px-2 text-xs sm:text-sm font-serif font-medium tracking-wide min-w-[120px] text-center select-none">
+                    {MONTH_NAMES[currentMonth]} {currentYear}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={handleNextMonth}
+                    title="Next Month"
+                    className={`p-1 rounded-md transition-colors cursor-pointer ${
+                      isDark ? 'hover:bg-neutral-800 text-neutral-300' : 'hover:bg-stone-100 text-neutral-700'
+                    }`}
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Right: Primary Action Button */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="button"
+                  onClick={() => onAddEntryForDate(selectedDateStr)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                >
+                  <Feather className="w-3.5 h-3.5" />
+                  <span>Write Reflection</span>
+                </motion.button>
+              </div>
             </div>
 
-            {selectedEvents.length === 0 ? (
-              <div className={`p-4 rounded-2xl border text-center ${
-                isDark ? 'bg-neutral-950/40 border-neutral-800/60' : 'bg-neutral-50 border-neutral-200/60'
-              }`}>
-                <p className={`text-xs ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                  No events or reminders set for this date.
-                </p>
-                <button
-                  onClick={() => setIsEventModalOpen(true)}
-                  className="mt-2 text-xs text-amber-500 hover:underline font-medium inline-flex items-center gap-1"
-                >
-                  Add milestone / reminder <Plus className="w-3 h-3" />
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                {selectedEvents.map((ev) => {
-                  const Icon = getCategoryIcon(ev.category);
-                  const isDone = !!ev.isCompleted;
-
+            {/* QUICK PRESETS STRIP (Compact horizontal strip - shrink-0) */}
+            <div className="relative z-10 flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-black/[0.05] dark:border-white/[0.05] shrink-0">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 w-full pr-8 sm:pr-12">
+                <span className={`text-[10px] font-mono uppercase tracking-wider font-semibold whitespace-nowrap flex items-center gap-1 mr-0.5 shrink-0 ${
+                  isDark ? 'text-teal-400' : 'text-teal-700'
+                }`}>
+                  <Sparkles className="w-3 h-3 text-teal-500 shrink-0" />
+                  Quick Presets:
+                </span>
+                {EVENT_PRESETS.map((preset) => {
+                  const Icon = preset.icon;
                   return (
-                    <div
-                      key={ev.id}
-                      className={`p-3 rounded-2xl border transition-all flex items-start gap-2.5 ${
-                        getCategoryStyles(ev.category, isDark)
-                      } ${isDone ? 'opacity-50' : ''}`}
+                    <button
+                      key={preset.category}
+                      type="button"
+                      onClick={() => handleOpenPreset(preset)}
+                      title={`Schedule ${preset.label} for ${selectedDateStr}`}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border transition-all cursor-pointer whitespace-nowrap hover:scale-105 shadow-2xs shrink-0 ${
+                        isDark
+                          ? 'bg-neutral-900/80 hover:bg-neutral-800 border-white/[0.08] text-neutral-300'
+                          : 'bg-white hover:bg-stone-50 border-stone-300 text-neutral-800'
+                      }`}
                     >
-                      <button
-                        onClick={() => onToggleEventComplete(ev.id, !isDone)}
-                        title={isDone ? "Mark as Active" : "Mark as Completed"}
-                        className="mt-0.5 flex-shrink-0 cursor-pointer text-neutral-400 hover:text-amber-500 transition-colors"
-                      >
-                        {isDone ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                        ) : (
-                          <Circle className="w-4 h-4" />
-                        )}
-                      </button>
+                      <Icon className={`w-3 h-3 ${preset.color} shrink-0`} />
+                      <span className="whitespace-nowrap">{preset.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className={`text-xs font-semibold truncate ${
-                            isDone ? 'line-through' : ''
+            {/* MAIN DUAL PANE WORKSPACE (flex-1 min-h-0: Calendar Grid on Left, Day Dossier on Right) */}
+            <div className="relative z-10 flex-1 min-h-0 flex flex-col lg:flex-row gap-3 overflow-hidden">
+              
+              {/* Left Pane: Interactive Month Calendar Grid */}
+              <div className={`flex-1 min-h-0 flex flex-col rounded-2xl border p-2.5 sm:p-3 overflow-hidden transition-all ${
+                isDark 
+                  ? 'bg-neutral-900/60 border-white/[0.08] shadow-sm' 
+                  : 'bg-stone-100/70 border-stone-300/70 shadow-2xs'
+              }`}>
+                
+                {/* Weekday Names Header Row */}
+                <div className="grid grid-cols-7 text-center text-[10px] sm:text-xs font-mono uppercase tracking-wider py-1 shrink-0">
+                  {WEEKDAY_NAMES.map((name) => (
+                    <div
+                      key={name}
+                      className={`font-semibold ${
+                        name === 'Sun' || name === 'Sat'
+                          ? isDark ? 'text-teal-400' : 'text-teal-700'
+                          : isDark ? 'text-neutral-400' : 'text-neutral-600'
+                      }`}
+                    >
+                      {name}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Days Grid: Exactly fits 100% of available height with no scroll */}
+                <div 
+                  className="grid grid-cols-7 gap-1 sm:gap-1.5 flex-1 min-h-0 h-full w-full"
+                  style={{
+                    gridTemplateRows: `repeat(${calendarDays.length / 7}, minmax(0, 1fr))`
+                  }}
+                >
+                  {calendarDays.map((cell) => {
+                    const isSelected = cell.dateStr === selectedDateStr;
+                    const hasJournal = cell.journalEntries.length > 0;
+                    const hasEvents = cell.dayEvents.length > 0;
+
+                    return (
+                      <button
+                        key={cell.dateStr}
+                        type="button"
+                        onClick={() => setSelectedDateStr(cell.dateStr)}
+                        className={`h-full min-h-0 p-1 sm:p-1.5 rounded-xl flex flex-col justify-between text-left transition-all duration-150 relative cursor-pointer border overflow-hidden ${
+                          isSelected
+                            ? isDark
+                              ? 'bg-teal-500/20 border-teal-500 shadow-[0_0_12px_rgba(20,184,166,0.3)] ring-1 ring-teal-500'
+                              : 'bg-teal-100/90 border-teal-600 shadow-[0_0_12px_rgba(13,148,136,0.2)] ring-1 ring-teal-600'
+                            : hasJournal
+                            ? isDark
+                              ? 'bg-neutral-900/90 hover:bg-neutral-800/90 border-teal-500/30'
+                              : 'bg-teal-50/50 hover:bg-teal-100/60 border-teal-500/30'
+                            : cell.isCurrentMonth
+                            ? isDark
+                              ? 'bg-neutral-900/40 hover:bg-neutral-800/50 border-white/[0.04]'
+                              : 'bg-white/70 hover:bg-white border-stone-200/80 shadow-2xs'
+                            : isDark
+                            ? 'bg-neutral-950/20 opacity-30 border-transparent'
+                            : 'bg-stone-200/30 opacity-35 border-transparent'
+                        }`}
+                      >
+                        {/* Top: Day Number & Journal Marker */}
+                        <div className="flex items-center justify-between w-full shrink-0">
+                          <span className={`text-[10px] sm:text-xs font-mono font-medium rounded-full w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center ${
+                            cell.isToday
+                              ? 'bg-teal-600 text-white font-bold shadow-xs'
+                              : isSelected
+                              ? isDark ? 'text-teal-300 font-bold' : 'text-teal-950 font-bold'
+                              : cell.isCurrentMonth
+                              ? isDark ? 'text-neutral-200' : 'text-neutral-800'
+                              : isDark ? 'text-neutral-500' : 'text-neutral-400'
                           }`}>
-                            {ev.title}
+                            {cell.dayNumber}
                           </span>
-                          {ev.time && (
-                            <span className="text-[10px] font-mono opacity-75 flex items-center gap-1">
-                              <Clock className="w-2.5 h-2.5" />
-                              {ev.time}
+
+                          {/* Journal Indicator Badge */}
+                          {hasJournal && (
+                            <span 
+                              title={`${cell.journalEntries.length} reflection(s) written`}
+                              className={`flex items-center gap-0.5 px-1 py-0.2 rounded text-[9px] font-mono border shrink-0 ${
+                                isDark
+                                  ? 'bg-teal-500/20 text-teal-300 border-teal-500/30'
+                                  : 'bg-teal-100 text-teal-900 border-teal-300'
+                              }`}
+                            >
+                              <BookOpen className="w-2.5 h-2.5 text-teal-600 dark:text-teal-400" />
+                              <span>{cell.journalEntries.length}</span>
                             </span>
                           )}
                         </div>
 
-                        {ev.notes && (
-                          <p className="text-[11px] opacity-80 mt-0.5 line-clamp-2">
-                            {ev.notes}
-                          </p>
-                        )}
+                        {/* Bottom: Milestone Pills or Dot Indicators */}
+                        <div className="w-full space-y-0.5 mt-0.5 min-h-0 overflow-hidden">
+                          {cell.dayEvents.slice(0, 1).map((ev) => {
+                            const Icon = getCategoryIcon(ev.category);
+                            return (
+                              <div
+                                key={ev.id}
+                                className={`flex items-center gap-0.5 px-1 py-0.2 rounded text-[9px] truncate font-medium border ${getCategoryStyles(ev.category, isDark)} ${
+                                  ev.isCompleted ? 'line-through opacity-60' : ''
+                                }`}
+                              >
+                                <Icon className="w-2 h-2 shrink-0" />
+                                <span className="truncate leading-tight">{ev.title}</span>
+                              </div>
+                            );
+                          })}
 
-                        <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-black/5 dark:border-white/5 text-[9px] opacity-70 uppercase font-mono">
-                          <span>{ev.category}</span>
-                          <button
-                            onClick={() => onDeleteEvent(ev.id)}
-                            title="Delete Event"
-                            className="text-rose-500 hover:text-rose-600 cursor-pointer p-0.5"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
+                          {cell.dayEvents.length > 1 && (
+                            <span className={`text-[8px] sm:text-[9px] block font-mono pl-0.5 leading-none truncate ${
+                              isDark ? 'text-neutral-400' : 'text-neutral-500'
+                            }`}>
+                              +{cell.dayEvents.length - 1} more
+                            </span>
+                          )}
                         </div>
-                      </div>
+
+                        {/* Subtle Journal glow bottom line */}
+                        {hasJournal && (
+                          <div className="h-0.5 w-full bg-gradient-to-r from-transparent via-teal-500/50 to-transparent rounded-full mt-0.5 shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Compact Legend Strip (shrink-0) */}
+                <div className="pt-2 mt-auto border-t border-black/[0.05] dark:border-white/[0.05] flex flex-wrap items-center justify-between gap-2 text-[10px] shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-teal-600 shadow-xs" />
+                      <span className={isDark ? 'text-neutral-300' : 'text-neutral-700'}>Today</span>
                     </div>
-                  );
-                })}
+                    <div className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-teal-500/30 border border-teal-500" />
+                      <span className={isDark ? 'text-neutral-300' : 'text-neutral-700'}>Reflection Written</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-rose-500/40 border border-rose-500" />
+                      <span className={isDark ? 'text-neutral-300' : 'text-neutral-700'}>Milestone Event</span>
+                    </div>
+                  </div>
+
+                  <span className={`hidden sm:inline italic text-[10px] ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                    Click any date to inspect reflections and milestones.
+                  </span>
+                </div>
               </div>
-            )}
+
+              {/* Right Pane: Selected Date Detail Dossier */}
+              <div className={`w-full lg:w-80 xl:w-88 shrink-0 flex flex-col min-h-0 rounded-2xl border p-3 overflow-hidden transition-all ${
+                isDark 
+                  ? 'bg-neutral-900/70 border-white/[0.08] shadow-sm' 
+                  : 'bg-stone-100/80 border-stone-300/70 shadow-2xs'
+              }`}>
+                
+                {/* Header: Date Title & Today indicator */}
+                <div className="flex items-start justify-between gap-2 pb-2 border-b border-black/[0.06] dark:border-white/[0.06] shrink-0">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <CalendarIcon className={`w-3.5 h-3.5 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+                      <span className={`text-[10px] font-mono tracking-wider uppercase font-semibold ${
+                        isDark ? 'text-teal-300' : 'text-teal-900'
+                      }`}>
+                        Selected Date
+                      </span>
+                    </div>
+                    <h2 className={`font-serif text-sm sm:text-base font-semibold tracking-tight mt-0.5 break-words leading-tight ${
+                      isDark ? 'text-neutral-100' : 'text-neutral-900'
+                    }`}>
+                      {formattedSelectedDate}
+                    </h2>
+                  </div>
+
+                  {selectedDateStr === todayStr && (
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono uppercase font-semibold shrink-0 ${
+                      isDark ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40' : 'bg-teal-100 text-teal-900 border border-teal-300'
+                    }`}>
+                      Today
+                    </span>
+                  )}
+                </div>
+
+                {/* Quick Actions for Selected Date */}
+                <div className="grid grid-cols-2 gap-1.5 my-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onAddEntryForDate(selectedDateStr)}
+                    className="flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-[11px] font-semibold bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                  >
+                    <Feather className="w-3 h-3" />
+                    <span>Write Reflection</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategory('birthday');
+                      setEventTitle('');
+                      setEventTime('');
+                      setEventNotes('');
+                      setIsEventModalOpen(true);
+                    }}
+                    className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-[11px] font-medium border transition-all cursor-pointer whitespace-nowrap ${
+                      isDark
+                        ? 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border-white/[0.08]'
+                        : 'bg-white hover:bg-stone-50 text-neutral-800 border-stone-300 shadow-2xs'
+                    }`}
+                  >
+                    <Plus className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                    <span>Add Milestone</span>
+                  </button>
+                </div>
+
+                {/* Tab Switcher: Reflections vs Milestones */}
+                <div className={`flex items-center gap-1 p-0.5 rounded-xl border mb-2 shrink-0 text-[11px] font-medium ${
+                  isDark ? 'bg-neutral-950/60 border-white/[0.06]' : 'bg-stone-200/60 border-stone-300/60'
+                }`}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDetailTab('reflections')}
+                    className={`flex-1 py-1 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      activeDetailTab === 'reflections'
+                        ? isDark 
+                          ? 'bg-teal-500/20 text-teal-200 border border-teal-500/40 shadow-xs font-semibold' 
+                          : 'bg-white text-teal-900 border border-teal-300/80 shadow-2xs font-semibold'
+                        : isDark ? 'text-neutral-400 hover:text-neutral-200' : 'text-neutral-600 hover:text-neutral-900'
+                    }`}
+                  >
+                    <BookOpen className="w-3 h-3" />
+                    <span>Reflections ({selectedEntries.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveDetailTab('milestones')}
+                    className={`flex-1 py-1 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      activeDetailTab === 'milestones'
+                        ? isDark 
+                          ? 'bg-teal-500/20 text-teal-200 border border-teal-500/40 shadow-xs font-semibold' 
+                          : 'bg-white text-teal-900 border border-teal-300/80 shadow-2xs font-semibold'
+                        : isDark ? 'text-neutral-400 hover:text-neutral-200' : 'text-neutral-600 hover:text-neutral-900'
+                    }`}
+                  >
+                    <Bell className="w-3 h-3" />
+                    <span>Milestones ({selectedEvents.length})</span>
+                  </button>
+                </div>
+
+                {/* Scrollable list inside the dossier card (only this inner container scrolls if entries exceed height) */}
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
+                  {activeDetailTab === 'reflections' ? (
+                    selectedEntries.length === 0 ? (
+                      <div className={`p-4 rounded-xl border text-center my-auto ${
+                        isDark ? 'bg-neutral-950/40 border-neutral-800/60' : 'bg-white border-stone-200'
+                      }`}>
+                        <BookOpen className={`w-6 h-6 mx-auto mb-1.5 opacity-40 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+                        <p className={`text-xs ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                          No reflection recorded for this date yet.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => onAddEntryForDate(selectedDateStr)}
+                          className="mt-2 text-xs text-teal-600 dark:text-teal-400 hover:underline font-semibold inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          Start writing reflection <ArrowRight className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      selectedEntries.map((entry) => (
+                        <div
+                          key={entry.id}
+                          onClick={() => onOpenEntry(entry)}
+                          className={`p-2.5 rounded-xl border transition-all cursor-pointer group ${
+                            isDark
+                              ? 'bg-neutral-950/60 hover:bg-neutral-800/60 border-white/[0.06]'
+                              : 'bg-white hover:bg-stone-50 border-stone-200 shadow-2xs'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1.5">
+                            <h4 className="text-xs font-semibold break-words leading-tight group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
+                              {entry.title || 'Untitled Reflection'}
+                            </h4>
+                            {entry.mood && (
+                              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-teal-500/10 text-teal-700 dark:text-teal-300 shrink-0">
+                                {entry.mood}
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-[11px] line-clamp-2 mt-1 ${
+                            isDark ? 'text-neutral-400' : 'text-neutral-600'
+                          }`}>
+                            {entry.content}
+                          </p>
+                          <div className="flex items-center justify-between mt-2 pt-1 border-t border-black/[0.05] dark:border-white/[0.05] text-[10px] text-neutral-400 font-mono">
+                            <span>{entry.wordCount || entry.content.split(/\s+/).filter(Boolean).length} words</span>
+                            <span className="text-teal-600 dark:text-teal-400 group-hover:underline font-medium">Open in Editor →</span>
+                          </div>
+                        </div>
+                      ))
+                    )
+                  ) : (
+                    selectedEvents.length === 0 ? (
+                      <div className={`p-4 rounded-xl border text-center my-auto ${
+                        isDark ? 'bg-neutral-950/40 border-neutral-800/60' : 'bg-white border-stone-200'
+                      }`}>
+                        <Bell className={`w-6 h-6 mx-auto mb-1.5 opacity-40 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+                        <p className={`text-xs ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                          No milestones or reminders scheduled for this date.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setIsEventModalOpen(true)}
+                          className="mt-2 text-xs text-teal-600 dark:text-teal-400 hover:underline font-semibold inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          Add milestone or reminder <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      selectedEvents.map((ev) => {
+                        const Icon = getCategoryIcon(ev.category);
+                        const isDone = !!ev.isCompleted;
+
+                        return (
+                          <div
+                            key={ev.id}
+                            className={`p-2.5 rounded-xl border transition-all flex items-start gap-2 ${
+                              getCategoryStyles(ev.category, isDark)
+                            } ${isDone ? 'opacity-50' : ''}`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => onToggleEventComplete(ev.id, !isDone)}
+                              title={isDone ? "Mark as Active" : "Mark as Completed"}
+                              className="mt-0.5 shrink-0 cursor-pointer text-neutral-400 hover:text-teal-500 transition-colors"
+                            >
+                              {isDone ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                              ) : (
+                                <Circle className="w-4 h-4" />
+                              )}
+                            </button>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className={`text-xs font-semibold break-words leading-tight ${
+                                  isDone ? 'line-through' : ''
+                                }`}>
+                                  {ev.title}
+                                </span>
+                                {ev.time && (
+                                  <span className="text-[10px] font-mono opacity-80 flex items-center gap-0.5 shrink-0">
+                                    <Clock className="w-2.5 h-2.5" />
+                                    {ev.time}
+                                  </span>
+                                )}
+                              </div>
+
+                              {ev.notes && (
+                                <p className="text-[11px] opacity-80 mt-0.5 break-words line-clamp-3">
+                                  {ev.notes}
+                                </p>
+                              )}
+
+                              <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-black/5 dark:border-white/5 text-[9px] opacity-80 uppercase font-mono">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span>{ev.category}</span>
+                                  {ev.recurrence && ev.recurrence !== 'none' && (
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-teal-500/15 text-teal-700 dark:text-teal-300 font-semibold lowercase">
+                                      <Repeat className="w-2.5 h-2.5" />
+                                      {ev.recurrence}
+                                    </span>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteEvent(ev.id)}
+                                  title="Delete Milestone"
+                                  className="text-rose-500 hover:text-rose-600 cursor-pointer p-0.5 shrink-0"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )
+                  )}
+                </div>
+
+              </div>
+
+            </div>
+
           </div>
-
-        </div>
-
-      </div>
 
       {/* EVENT CREATION MODAL */}
       <AnimatePresence>
@@ -908,7 +977,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
               <div className="flex items-center gap-2 mb-1">
                 <span className={`px-2 py-0.5 text-[9px] font-mono tracking-wider uppercase rounded-full border ${
-                  isDark ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-amber-50 text-amber-800 border-amber-200'
+                  isDark ? 'bg-teal-500/10 text-teal-300 border-teal-500/20' : 'bg-teal-50 text-teal-800 border-teal-200'
                 }`}>
                   Calendar Event & Reminder
                 </span>
@@ -928,7 +997,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   <label className="text-[11px] font-mono uppercase tracking-wider text-neutral-400 block mb-1.5">
                     Select Event Category
                   </label>
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                     {EVENT_PRESETS.map((preset) => {
                       const Icon = preset.icon;
                       const isCatActive = selectedCategory === preset.category;
@@ -942,19 +1011,22 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                               setEventTitle(preset.defaultTitle);
                             }
                             setEventPriority(preset.defaultPriority);
+                            if (preset.category === 'birthday' || preset.category === 'anniversary') {
+                              setEventRecurrence('yearly');
+                            }
                           }}
-                          className={`flex items-center gap-1.5 p-2 rounded-xl border text-[11px] font-medium transition-all ${
+                          className={`flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap ${
                             isCatActive
                               ? isDark
-                                ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
-                                : 'bg-amber-100 border-amber-400 text-amber-900 shadow-sm'
+                                ? 'bg-teal-500/20 border-teal-500 text-teal-300 shadow-sm ring-1 ring-teal-500/40'
+                                : 'bg-teal-100 border-teal-500 text-teal-900 shadow-sm ring-1 ring-teal-400'
                               : isDark
                               ? 'bg-neutral-800/60 border-neutral-700/60 text-neutral-400 hover:text-neutral-200'
                               : 'bg-neutral-100 border-neutral-200 text-neutral-600 hover:text-neutral-900'
                           }`}
                         >
-                          <Icon className={`w-3.5 h-3.5 ${preset.color}`} />
-                          <span className="truncate">{preset.label}</span>
+                          <Icon className={`w-3.5 h-3.5 shrink-0 ${preset.color}`} />
+                          <span className="whitespace-nowrap font-medium">{preset.label}</span>
                         </button>
                       );
                     })}
@@ -974,8 +1046,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     placeholder="e.g., Mom's Birthday, Team Lunch, Graduation..."
                     className={`w-full px-3.5 py-2 rounded-xl text-xs border outline-none transition-all ${
                       isDark
-                        ? 'bg-neutral-950 border-neutral-800 focus:border-amber-500 text-neutral-100'
-                        : 'bg-neutral-50 border-neutral-200 focus:border-amber-500 text-neutral-900'
+                        ? 'bg-neutral-950 border-neutral-800 focus:border-teal-500 text-neutral-100'
+                        : 'bg-neutral-50 border-neutral-200 focus:border-teal-500 text-neutral-900'
                     }`}
                   />
                 </div>
@@ -992,8 +1064,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       onChange={(e) => setSelectedDateStr(e.target.value)}
                       className={`w-full px-3 py-2 rounded-xl text-xs border outline-none ${
                         isDark
-                          ? 'bg-neutral-950 border-neutral-800 focus:border-amber-500 text-neutral-100'
-                          : 'bg-neutral-50 border-neutral-200 focus:border-amber-500 text-neutral-900'
+                          ? 'bg-neutral-950 border-neutral-800 focus:border-teal-500 text-neutral-100'
+                          : 'bg-neutral-50 border-neutral-200 focus:border-teal-500 text-neutral-900'
                       }`}
                     />
                   </div>
@@ -1009,10 +1081,59 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       placeholder="e.g., 7:30 PM"
                       className={`w-full px-3.5 py-2 rounded-xl text-xs border outline-none ${
                         isDark
-                          ? 'bg-neutral-950 border-neutral-800 focus:border-amber-500 text-neutral-100'
-                          : 'bg-neutral-50 border-neutral-200 focus:border-amber-500 text-neutral-900'
+                          ? 'bg-neutral-950 border-neutral-800 focus:border-teal-500 text-neutral-100'
+                          : 'bg-neutral-50 border-neutral-200 focus:border-teal-500 text-neutral-900'
                       }`}
                     />
+                  </div>
+                </div>
+
+                {/* Repeat / Recurrence Options */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-mono uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
+                      <Repeat className="w-3 h-3 text-teal-500 shrink-0" />
+                      <span>Repeat Frequency</span>
+                    </label>
+                    <span className="text-[10px] text-teal-600 dark:text-teal-400 font-medium">
+                      {eventRecurrence === 'none' && 'One-time only'}
+                      {eventRecurrence === 'daily' && 'Repeats every day'}
+                      {eventRecurrence === 'weekly' && 'Repeats weekly on this day'}
+                      {eventRecurrence === 'monthly' && 'Repeats monthly on this date'}
+                      {eventRecurrence === 'yearly' && 'Repeats every year on this date'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {(
+                      [
+                        { id: 'none', label: 'None' },
+                        { id: 'daily', label: 'Daily' },
+                        { id: 'weekly', label: 'Weekly' },
+                        { id: 'monthly', label: 'Monthly' },
+                        { id: 'yearly', label: 'Yearly' }
+                      ] as const
+                    ).map((opt) => {
+                      const isSelected = eventRecurrence === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setEventRecurrence(opt.id)}
+                          className={`px-2 py-1.5 rounded-xl border text-xs font-medium transition-all text-center cursor-pointer whitespace-nowrap ${
+                            isSelected
+                              ? isDark
+                                ? 'bg-teal-500/20 border-teal-500 text-teal-300 font-semibold shadow-2xs ring-1 ring-teal-500/50'
+                                : 'bg-teal-100 border-teal-500 text-teal-900 font-semibold shadow-2xs ring-1 ring-teal-400'
+                              : isDark
+                              ? 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-neutral-200'
+                              : 'bg-neutral-50 border-neutral-200 text-neutral-600 hover:text-neutral-900'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -1028,8 +1149,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     placeholder="e.g., Buy flowers, reserve table at 6, bring portfolio..."
                     className={`w-full px-3.5 py-2 rounded-xl text-xs border outline-none resize-none ${
                       isDark
-                        ? 'bg-neutral-950 border-neutral-800 focus:border-amber-500 text-neutral-100'
-                        : 'bg-neutral-50 border-neutral-200 focus:border-amber-500 text-neutral-900'
+                        ? 'bg-neutral-950 border-neutral-800 focus:border-teal-500 text-neutral-100'
+                        : 'bg-neutral-50 border-neutral-200 focus:border-teal-500 text-neutral-900'
                     }`}
                   />
                 </div>
@@ -1049,11 +1170,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   <button
                     type="submit"
                     disabled={isSubmitting || !eventTitle.trim()}
-                    className={`flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-semibold transition-all shadow-md cursor-pointer ${
-                      isDark
-                        ? 'bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-amber-500/20'
-                        : 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/20'
-                    } disabled:opacity-50`}
+                    className="flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-semibold transition-all shadow-md cursor-pointer bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white disabled:opacity-50"
                   >
                     {isSubmitting ? 'Saving...' : 'Save Milestone'}
                   </button>

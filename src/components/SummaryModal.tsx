@@ -128,10 +128,10 @@ ${summary.suggestedNextSteps.map(s => `→ ${s}`).join('\n')}
           <div className={`p-5 rounded-2xl border space-y-3 ${
             isDark
               ? 'bg-neutral-950/60 border-white/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'
-              : 'bg-amber-50/40 border-amber-200/50 shadow-2xs'
+              : 'bg-teal-50/40 border-teal-200/50 shadow-2xs'
           }`}>
             <h4 className={`text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 ${
-              isDark ? 'text-amber-400' : 'text-amber-700'
+              isDark ? 'text-teal-300' : 'text-teal-800'
             }`}>
               <Lightbulb className="w-3.5 h-3.5" />
               <span>Key Breakthroughs & Insights</span>

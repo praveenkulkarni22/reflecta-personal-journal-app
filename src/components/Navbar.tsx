@@ -66,15 +66,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             {isSidebarCollapsed ? (
-              <PanelLeft className="w-4 h-4 text-amber-500" />
+              <PanelLeft className={`w-4 h-4 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
             ) : (
-              <PanelLeftClose className="w-4 h-4 text-amber-500" />
+              <PanelLeftClose className={`w-4 h-4 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
             )}
           </button>
 
           <div className="flex items-center gap-2">
             <span className={`text-xs font-mono tracking-wider uppercase ${
-              isDark ? 'text-amber-400/90' : 'text-amber-700'
+              isDark ? 'text-teal-300' : 'text-teal-800 font-semibold'
             }`}>
               Sanctuary
             </span>
@@ -99,11 +99,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="topbar-sparks-btn"
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer ${
                 isDark
-                  ? 'bg-neutral-900 border-white/[0.08] hover:border-amber-500/40 text-amber-300 hover:text-amber-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
-                  : 'bg-amber-50 border-amber-200 hover:border-amber-300 text-amber-800 hover:bg-amber-100/70 shadow-sm'
+                  ? 'bg-neutral-900 border-white/[0.08] hover:border-teal-500/40 text-teal-200 hover:text-teal-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
+                  : 'bg-teal-50 border-teal-200 hover:border-teal-300 text-teal-800 hover:bg-teal-100/70 shadow-sm'
               }`}
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin-slow" />
+              <Sparkles className="w-3.5 h-3.5 text-teal-400 animate-spin-slow" />
               <span className="hidden sm:inline">Sparks</span>
             </motion.button>
           )}
@@ -118,8 +118,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             title={isDark ? "Switch to Radiant Light Sanctuary" : "Switch to Obsidian Dark Sanctuary"}
             className={`p-2 rounded-full border transition-all duration-300 cursor-pointer ${
               isDark
-                ? 'bg-neutral-900/80 text-amber-300 border-white/[0.08] hover:bg-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
-                : 'bg-neutral-100 text-amber-600 border-neutral-200 hover:bg-white shadow-[0_2px_6px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)]'
+                ? 'bg-neutral-900/80 text-teal-300 border-white/[0.08] hover:bg-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+                : 'bg-neutral-100 text-teal-700 border-neutral-200 hover:bg-white shadow-[0_2px_6px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,1)]'
             }`}
           >
             {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -136,14 +136,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Reflecta Sanctuary"
               className={`relative w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-300 ${
                 isDark
-                  ? 'bg-gradient-to-br from-amber-500/20 via-neutral-900 to-neutral-950 border border-amber-500/30 shadow-[0_4px_16px_rgba(245,158,11,0.2),inset_0_1px_0_rgba(255,255,255,0.2)]'
-                  : 'bg-gradient-to-br from-amber-50 via-white to-amber-100/60 border border-amber-500/30 shadow-[0_4px_14px_rgba(217,119,6,0.15),inset_0_1px_0_rgba(255,255,255,1)]'
+                  ? 'bg-gradient-to-br from-teal-500/20 via-neutral-900 to-neutral-950 border border-teal-500/30 shadow-[0_4px_16px_rgba(20,184,166,0.2),inset_0_1px_0_rgba(255,255,255,0.2)]'
+                  : 'bg-gradient-to-br from-teal-50 via-white to-teal-100/60 border border-teal-500/30 shadow-[0_4px_14px_rgba(13,148,136,0.15),inset_0_1px_0_rgba(255,255,255,1)]'
               }`}
             >
-              <span className={`font-serif text-base font-bold tracking-wider ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+              <span className={`font-serif text-base font-bold tracking-wider ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
                 R
               </span>
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full animate-pulse shadow-md shadow-amber-400/50" />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-teal-400 rounded-full animate-pulse shadow-md shadow-teal-400/50" />
             </motion.div>
             
             <div className="hidden md:flex flex-col">
@@ -153,7 +153,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 Reflecta
               </span>
               <span className={`text-[8px] font-mono uppercase tracking-wider leading-none ${
-                isDark ? 'text-amber-400/80' : 'text-amber-700'
+                isDark ? 'text-teal-300/80' : 'text-teal-800'
               }`}>
                 Sanctuary
               </span>
@@ -178,11 +178,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <img
                     src={user.photoURL}
                     alt={user.displayName || 'User'}
-                    className="w-6 h-6 rounded-full ring-1 ring-amber-500/30 object-cover"
+                    className="w-6 h-6 rounded-full ring-1 ring-teal-500/30 object-cover"
                     referrerPolicy="no-referrer"
                   />
                 ) : (
-                  <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs font-semibold">
+                  <div className="w-6 h-6 rounded-full bg-teal-500/20 text-teal-300 flex items-center justify-center text-xs font-semibold">
                     {(user.displayName || 'U')[0].toUpperCase()}
                   </div>
                 )}
@@ -208,7 +208,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <p className={`text-[11px] font-mono truncate ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
                         {user.email}
                       </p>
-                      <div className="flex items-center gap-1 mt-1 text-[10px] text-amber-500 font-medium">
+                      <div className="flex items-center gap-1 mt-1 text-[10px] text-teal-600 dark:text-teal-400 font-medium">
                         <Shield className="w-3 h-3" />
                         <span>Private Google Vault Active</span>
                       </div>
@@ -233,7 +233,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={onSignIn}
-              className="flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-md transition-all cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white shadow-md transition-all cursor-pointer"
             >
               <LogIn className="w-3.5 h-3.5" />
               <span>Sign In with Google</span>

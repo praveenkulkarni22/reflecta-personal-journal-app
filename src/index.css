@@ -5,6 +5,7 @@
     --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     --font-serif: 'Playfair Display', Georgia, Cambria, 'Times New Roman', serif;
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --font-handwriting: 'Caveat', cursive, 'Brush Script MT', sans-serif;
 
     /* Light Theme Tokens - Alabaster & Pearlescent Frosted Glass */
     --bg-main: #f8faf9;
@@ -19,7 +20,8 @@
     --glass-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.07), 0 0 1px 1px rgba(0, 0, 0, 0.04);
     --skeuo-inset: inset 0 1px 1px rgba(255, 255, 255, 1), inset 0 -1px 2px rgba(0, 0, 0, 0.03);
     --accent-emerald: #059669;
-    --accent-amber: #d97706;
+    --accent-teal: #0f766e;
+    --accent-sage: #14b8a6;
   }
 
   .dark {
@@ -36,7 +38,8 @@
     --glass-shadow: 0 24px 50px -12px rgba(0, 0, 0, 0.6), 0 0 1px 1px rgba(255, 255, 255, 0.06);
     --skeuo-inset: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 1px rgba(0, 0, 0, 0.4);
     --accent-emerald: #10b981;
-    --accent-amber: #f59e0b;
+    --accent-teal: #14b8a6;
+    --accent-sage: #2dd4bf;
   }
 
   body {
@@ -50,6 +53,10 @@
   h1, h2, h3, .font-serif {
     font-family: var(--font-serif);
     letter-spacing: -0.015em;
+  }
+
+  .font-handwriting {
+    font-family: var(--font-handwriting);
   }
 }
 

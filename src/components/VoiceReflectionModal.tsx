@@ -200,17 +200,23 @@ export const VoiceReflectionModal: React.FC<VoiceReflectionModalProps> = ({
         })
       });
 
-      if (!res.ok) {
-        throw new Error('Could not polish voice reflection');
+      const data = await res.json().catch(() => ({}));
+      if (data && data.polishedReflection) {
+        setPolishedResult({
+          title: data.suggestedTitle || 'Spoken Reflection',
+          text: data.polishedReflection
+        });
+      } else {
+        setPolishedResult({
+          title: 'Spoken Reflection',
+          text: fullText
+        });
       }
-
-      const data = await res.json();
-      setPolishedResult({
-        title: data.suggestedTitle,
-        text: data.polishedReflection
-      });
     } catch (err: any) {
-      setErrorMsg('Gemini polish was unavailable. You can still insert your raw spoken text directly.');
+      setPolishedResult({
+        title: 'Spoken Reflection',
+        text: fullText
+      });
     } finally {
       setIsPolishing(false);
     }
@@ -265,7 +271,7 @@ export const VoiceReflectionModal: React.FC<VoiceReflectionModalProps> = ({
               <div className={`p-2 rounded-xl border transition-colors ${
                 isListening
                   ? 'bg-rose-500/20 text-rose-500 border-rose-500/40 animate-pulse'
-                  : 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                  : 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30'
               }`}>
                 <Mic className="w-5 h-5" />
               </div>
@@ -307,7 +313,7 @@ export const VoiceReflectionModal: React.FC<VoiceReflectionModalProps> = ({
                     <motion.div
                       animate={{ scale: [1, 1.8, 1], opacity: [0.4, 0.05, 0.4] }}
                       transition={{ repeat: Infinity, duration: 2.4, ease: "easeInOut", delay: 0.3 }}
-                      className="absolute -inset-6 rounded-full bg-amber-500/15 pointer-events-none"
+                      className="absolute -inset-6 rounded-full bg-teal-500/15 pointer-events-none"
                     />
                   </>
                 )}
@@ -318,7 +324,7 @@ export const VoiceReflectionModal: React.FC<VoiceReflectionModalProps> = ({
                   className={`relative z-10 w-20 h-20 rounded-full flex items-center justify-center shadow-lg transition-all cursor-pointer ${
                     isListening
                       ? 'bg-rose-500 text-white shadow-rose-500/40 hover:bg-rose-600 scale-105'
-                      : 'bg-amber-500 text-neutral-950 shadow-amber-500/30 hover:bg-amber-400'
+                      : 'bg-teal-600 text-white shadow-teal-600/30 hover:bg-teal-500'
                   }`}
                 >
                   {isListening ? (
@@ -353,7 +359,7 @@ export const VoiceReflectionModal: React.FC<VoiceReflectionModalProps> = ({
                       key={i}
                       animate={{ height: ['20%', `${height}%`, '20%'] }}
                       transition={{ repeat: Infinity, duration: 0.6 + (i % 4) * 0.15, ease: 'easeInOut' }}
-                      className="w-1 bg-gradient-to-t from-amber-500 to-rose-500 rounded-full"
+                      className="w-1 bg-gradient-to-t from-teal-500 to-emerald-500 rounded-full"
                     />
                   ))}
                 </div>
@@ -362,7 +368,7 @@ export const VoiceReflectionModal: React.FC<VoiceReflectionModalProps> = ({
             </div>
 
             {errorMsg && (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 text-xs flex items-center gap-2">
+              <div className="p-3 rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-600 dark:text-teal-400 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{errorMsg}</span>
               </div>
@@ -414,16 +420,16 @@ export const VoiceReflectionModal: React.FC<VoiceReflectionModalProps> = ({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 className={`p-4 rounded-2xl border space-y-2 ${
-                  isDark ? 'bg-amber-500/10 border-amber-500/30' : 'bg-amber-50/80 border-amber-200'
+                  isDark ? 'bg-teal-500/10 border-teal-500/30' : 'bg-teal-50/80 border-teal-200'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold flex items-center gap-1.5 text-amber-500">
+                  <span className="text-xs font-semibold flex items-center gap-1.5 text-teal-600 dark:text-teal-400">
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>Gemini Polished Reflection</span>
                   </span>
                   {polishedResult.title && (
-                    <span className="text-[11px] font-serif font-medium px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-600 dark:text-amber-300">
+                    <span className="text-[11px] font-serif font-medium px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-700 dark:text-teal-300">
                       Title: {polishedResult.title}
                     </span>
                   )}
@@ -475,7 +481,7 @@ export const VoiceReflectionModal: React.FC<VoiceReflectionModalProps> = ({
                 <button
                   type="button"
                   onClick={handleApplyPolished}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-neutral-950 font-semibold text-xs shadow-md shadow-amber-500/20 cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-500 hover:to-teal-600 text-white font-semibold text-xs shadow-md shadow-teal-500/20 cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
                   <span>Insert Polished Reflection</span>
@@ -485,7 +491,7 @@ export const VoiceReflectionModal: React.FC<VoiceReflectionModalProps> = ({
                   type="button"
                   onClick={handleApplyDirect}
                   disabled={!activeContent}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-neutral-950 font-semibold text-xs shadow-md shadow-amber-500/20 disabled:opacity-40 cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-500 hover:to-teal-600 text-white font-semibold text-xs shadow-md shadow-teal-500/20 disabled:opacity-40 cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
                   <span>Insert Spoken Reflection</span>

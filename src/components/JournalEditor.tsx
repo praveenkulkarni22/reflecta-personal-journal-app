@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, 
@@ -22,13 +22,35 @@ import {
   X,
   Plus,
   Trash2,
-  Maximize2
+  Maximize2,
+  Leaf,
+  Sun,
+  Heart,
+  Search,
+  Feather,
+  Waves,
+  CloudRain,
+  HeartCrack,
+  CircleSlash,
+  Activity,
+  Flame,
+  BatteryLow,
+  CloudFog,
+  PenTool,
+  Scale,
+  Palette,
+  ChevronLeft,
+  ChevronRight,
+  Calendar as CalendarIcon,
+  Tag
 } from 'lucide-react';
 import { JournalEntry, ReflectionMood, ReflectionIntention, JournalLocation, JournalPhoto } from '../types';
 import { calculateWordCount, calculateReadingTimeMinutes } from '../lib/utils';
 import { useTheme } from '../context/ThemeContext';
 import { LocationTaggerModal } from './LocationTaggerModal';
 import { VoiceReflectionModal } from './VoiceReflectionModal';
+import { CandidateMonthCalendar } from './CandidateMonthCalendar';
+import { getCurrentUserToken } from '../lib/firebase';
 
 interface JournalEditorProps {
   currentEntry: Partial<JournalEntry>;
@@ -37,39 +59,76 @@ interface JournalEditorProps {
   onSummarize: (title: string, content: string) => void;
   onOpenSparks: () => void;
   isSaving: boolean;
+  existingEntries?: JournalEntry[];
+  onSelectDateEntry?: (entry: JournalEntry) => void;
 }
 
-const MOODS: { key: ReflectionMood; label: string; icon: string; group: 'serene' | 'contemplative' | 'friction' }[] = [
-  // Serene & Uplifting
-  { key: 'calm', label: 'Calm', icon: '🍃', group: 'serene' },
-  { key: 'peaceful', label: 'Peaceful', icon: '🕊️', group: 'serene' },
-  { key: 'grateful', label: 'Grateful', icon: '✨', group: 'serene' },
-  { key: 'energized', label: 'Energized', icon: '⚡', group: 'serene' },
-  
-  // Contemplative & Inquiry
-  { key: 'thoughtful', label: 'Thoughtful', icon: '💭', group: 'contemplative' },
-  { key: 'curious', label: 'Curious', icon: '🔭', group: 'contemplative' },
-  { key: 'searching', label: 'Searching', icon: '🧭', group: 'contemplative' },
-  { key: 'vulnerable', label: 'Vulnerable', icon: '🪶', group: 'contemplative' },
+export type MoodCategory = 'peaceful' | 'reflective' | 'overload' | 'depleted';
 
-  // Low / Negative / Friction Feelings
-  { key: 'overwhelmed', label: 'Overwhelmed', icon: '🌊', group: 'friction' },
-  { key: 'disappointed', label: 'Disappointed', icon: '🌧️', group: 'friction' },
-  { key: 'sorrow', label: 'Sorrow', icon: '🥀', group: 'friction' },
-  { key: 'disgusted', label: 'Disgusted', icon: '🌪️', group: 'friction' },
-  { key: 'anxious', label: 'Anxious', icon: '⚡', group: 'friction' },
-  { key: 'frustrated', label: 'Frustrated', icon: '🌋', group: 'friction' },
-  { key: 'exhausted', label: 'Exhausted', icon: '🍂', group: 'friction' },
-  { key: 'melancholy', label: 'Melancholy', icon: '🕯️', group: 'friction' },
+export interface MoodOption {
+  key: ReflectionMood;
+  label: string;
+  group: MoodCategory;
+}
+
+export interface IntentionOption {
+  key: ReflectionIntention;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+export const STATE_OF_MIND_CATEGORIES: {
+  key: MoodCategory;
+  label: string;
+  sublabel: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { key: 'peaceful', label: 'Peaceful & Grounded', sublabel: 'Calm, peaceful, grateful', icon: Leaf },
+  { key: 'reflective', label: 'Reflective & Inquiring', sublabel: 'Thoughtful, curious, searching', icon: Feather },
+  { key: 'overload', label: 'Overload & Stress', sublabel: 'Overwhelmed, anxious, friction', icon: Activity },
+  { key: 'depleted', label: 'Low Energy & Depleted', sublabel: 'Exhausted, tender, melancholy', icon: BatteryLow },
 ];
 
-const INTENTIONS: { key: ReflectionIntention; label: string; icon: string }[] = [
-  { key: 'free_expression', label: 'Free Expression', icon: '✍️' },
-  { key: 'unpack_friction', label: 'Unpack Friction', icon: '🔍' },
-  { key: 'gratitude_focus', label: 'Gratitude Focus', icon: '🙏' },
-  { key: 'brainstorm_ideas', label: 'Brainstorm Ideas', icon: '💡' },
-  { key: 'decision_clarity', label: 'Decision Clarity', icon: '⚖️' },
-  { key: 'creative_flow', label: 'Creative Flow', icon: '🎨' },
+export const CATEGORY_DEFAULT_MOOD: Record<MoodCategory, ReflectionMood> = {
+  peaceful: 'peaceful',
+  reflective: 'thoughtful',
+  overload: 'overwhelmed',
+  depleted: 'exhausted',
+};
+
+const MOODS: MoodOption[] = [
+  // Peaceful & Grounded (calm, centered, serene)
+  { key: 'calm', label: 'Calm', group: 'peaceful' },
+  { key: 'peaceful', label: 'Peaceful', group: 'peaceful' },
+  { key: 'grateful', label: 'Grateful', group: 'peaceful' },
+  
+  // Reflective & Inquiring (exploratory, introspective, creative)
+  { key: 'thoughtful', label: 'Thoughtful', group: 'reflective' },
+  { key: 'curious', label: 'Curious', group: 'reflective' },
+  { key: 'energized', label: 'Energized', group: 'reflective' },
+  { key: 'searching', label: 'Searching', group: 'reflective' },
+  { key: 'vulnerable', label: 'Vulnerable', group: 'reflective' },
+
+  // Overload & Stress (Mental/sensory overload, high-arousal friction, cognitive saturation)
+  { key: 'overwhelmed', label: 'Overwhelmed', group: 'overload' },
+  { key: 'anxious', label: 'Anxious', group: 'overload' },
+  { key: 'frustrated', label: 'Frustrated', group: 'overload' },
+
+  // Low Energy & Tender (Depleted energy, fatigue, sadness, grief)
+  { key: 'exhausted', label: 'Exhausted', group: 'depleted' },
+  { key: 'melancholy', label: 'Melancholy', group: 'depleted' },
+  { key: 'disappointed', label: 'Disappointed', group: 'depleted' },
+  { key: 'sorrow', label: 'Sorrow', group: 'depleted' },
+  { key: 'disgusted', label: 'Disgusted', group: 'depleted' },
+];
+
+const INTENTIONS: IntentionOption[] = [
+  { key: 'free_expression', label: 'Free Expression', icon: PenTool },
+  { key: 'unpack_friction', label: 'Unpack Friction', icon: Search },
+  { key: 'gratitude_focus', label: 'Gratitude Focus', icon: Heart },
+  { key: 'brainstorm_ideas', label: 'Brainstorm Ideas', icon: Lightbulb },
+  { key: 'decision_clarity', label: 'Decision Clarity', icon: Scale },
+  { key: 'creative_flow', label: 'Creative Flow', icon: Palette },
 ];
 
 // Client-side image compression helper
@@ -116,14 +175,40 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
   onStartReflection,
   onSummarize,
   onOpenSparks,
-  isSaving
+  isSaving,
+  existingEntries = [],
+  onSelectDateEntry
 }) => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
+  const extractInitialEmotions = useCallback((entry: Partial<JournalEntry>): ReflectionMood[] => {
+    const set = new Set<ReflectionMood>();
+    if (entry.mood && MOODS.some(m => m.key === entry.mood)) {
+      set.add(entry.mood);
+    }
+    if (Array.isArray(entry.tags)) {
+      entry.tags.forEach(t => {
+        const found = MOODS.find(m => m.key.toLowerCase() === t.toLowerCase() || m.label.toLowerCase() === t.toLowerCase());
+        if (found) set.add(found.key);
+      });
+    }
+    return Array.from(set);
+  }, []);
+
   const [title, setTitle] = useState(currentEntry.title || '');
   const [content, setContent] = useState(currentEntry.content || '');
-  const [mood, setMood] = useState<ReflectionMood>(currentEntry.mood || 'thoughtful');
+  // Selected emotions list: user can select any number of emotions within or across categories (Req 3)
+  const [selectedEmotions, setSelectedEmotions] = useState<ReflectionMood[]>(() => extractInitialEmotions(currentEntry));
+  const [mood, setMood] = useState<ReflectionMood | undefined>(currentEntry.mood || undefined);
+  const [selectedCategory, setSelectedCategory] = useState<MoodCategory | null>(() => {
+    if (currentEntry.mood) {
+      const found = MOODS.find(m => m.key === currentEntry.mood);
+      return found ? found.group : null;
+    }
+    return null;
+  });
+  const [tags, setTags] = useState<string[]>((currentEntry.tags as string[]) || []);
   const [intention, setIntention] = useState<ReflectionIntention>(currentEntry.intention || 'free_expression');
   const [entryDate, setEntryDate] = useState<string>(currentEntry.entryDate || '');
   const [photos, setPhotos] = useState<JournalPhoto[]>(
@@ -131,7 +216,18 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
   );
   const [location, setLocation] = useState<JournalLocation | undefined>(currentEntry.location);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
-  const [moodFilter, setMoodFilter] = useState<'all' | 'serene' | 'contemplative' | 'friction'>('all');
+
+  // Calendar Popover state
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+
+  // Emotional analysis state
+  const [isAnalyzingEmotions, setIsAnalyzingEmotions] = useState(false);
+  const [eqInsight, setEqInsight] = useState<{
+    emotionalQuotient?: string;
+    tone?: string;
+    mindfulObservation?: string;
+  } | null>(null);
+  const [emotionStatusMessage, setEmotionStatusMessage] = useState<string | null>(null);
 
   // Modals
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
@@ -149,29 +245,187 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
     setEntryDate(currentEntry.entryDate || '');
     setPhotos((currentEntry.photos as JournalPhoto[]) || []);
     setLocation(currentEntry.location);
-    if (currentEntry.mood) setMood(currentEntry.mood);
+    
+    const initialEmotions = extractInitialEmotions(currentEntry);
+    setSelectedEmotions(initialEmotions);
+    if (initialEmotions.length > 0) {
+      setMood(initialEmotions[0]);
+      const found = MOODS.find(m => m.key === initialEmotions[0]);
+      setSelectedCategory(found ? found.group : null);
+    } else if (currentEntry.mood) {
+      setMood(currentEntry.mood);
+      const found = MOODS.find(m => m.key === currentEntry.mood);
+      setSelectedCategory(found ? found.group : null);
+    } else {
+      setMood(undefined);
+      setSelectedCategory(null);
+    }
+
     if (currentEntry.intention) setIntention(currentEntry.intention);
-  }, [currentEntry.id, currentEntry.entryDate, currentEntry.title]);
+    setTags((currentEntry.tags as string[]) || []);
+    setEqInsight(null);
+    setEmotionStatusMessage(null);
+  }, [currentEntry.id, currentEntry.entryDate, currentEntry.title, extractInitialEmotions]);
 
   const words = calculateWordCount(content);
   const readingTime = calculateReadingTimeMinutes(content);
 
+  // Date calculations
+  const effectiveDate = entryDate || new Date().toISOString().slice(0, 10);
+
+  const shiftDate = (days: number) => {
+    try {
+      const [y, m, d] = effectiveDate.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      dt.setDate(dt.getDate() + days);
+      const newY = dt.getFullYear();
+      const newM = String(dt.getMonth() + 1).padStart(2, '0');
+      const newD = String(dt.getDate()).padStart(2, '0');
+      setEntryDate(`${newY}-${newM}-${newD}`);
+    } catch {
+      // fallback
+    }
+  };
+
+  const formatDateLabel = (dateStr: string) => {
+    try {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      return dt.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const existingEntryDatesSet = useMemo(() => {
+    const set = new Set<string>();
+    if (existingEntries) {
+      existingEntries.forEach(e => {
+        const d = e.entryDate || (e.createdAt ? e.createdAt.slice(0, 10) : '');
+        if (d) set.add(d);
+      });
+    }
+    return set;
+  }, [existingEntries]);
+
+  const existingEntryForSelectedDate = useMemo(() => {
+    if (!existingEntries) return null;
+    return existingEntries.find(e => {
+      const d = e.entryDate || (e.createdAt ? e.createdAt.slice(0, 10) : '');
+      return d === effectiveDate && e.id !== currentEntry.id;
+    });
+  }, [existingEntries, effectiveDate, currentEntry.id]);
+
+  // AI Emotional Analysis Helper (Req 3 & 4)
+  const analyzeEmotionsWithGemini = useCallback(async (titleText: string, contentText: string) => {
+    setIsAnalyzingEmotions(true);
+    setEmotionStatusMessage('Analyzing state of mind and emotional quotient...');
+    try {
+      const token = await getCurrentUserToken();
+      const res = await fetch('/api/gemini/analyze-emotions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          title: titleText,
+          content: contentText
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (data && data.primaryMood && data.category) {
+        const emotionTag = data.primaryMood;
+        const extraEmotionTags = (data.tags || []).filter((t: string) => 
+          !STATE_OF_MIND_CATEGORIES.some(c => c.label.toLowerCase() === t.toLowerCase() || c.key.toLowerCase() === t.toLowerCase())
+        );
+
+        const newEmotions = Array.from(new Set([
+          ...selectedEmotions,
+          emotionTag,
+          ...extraEmotionTags
+        ])) as ReflectionMood[];
+
+        setSelectedEmotions(newEmotions);
+        setMood(data.primaryMood as ReflectionMood);
+        setSelectedCategory(data.category as MoodCategory);
+
+        // Req 3: All should be # hashtagged to the particular reflection
+        const newTags = Array.from(new Set([
+          ...tags.filter(t => !STATE_OF_MIND_CATEGORIES.some(c => c.label.toLowerCase() === t.toLowerCase() || c.key.toLowerCase() === t.toLowerCase())),
+          ...newEmotions
+        ]));
+        setTags(newTags);
+
+        if (data.eqAnalysis) {
+          setEqInsight(data.eqAnalysis);
+        }
+
+        const moodLabel = MOODS.find(m => m.key === data.primaryMood)?.label || data.primaryMood;
+        setEmotionStatusMessage(`State of Mind applied: "${moodLabel}" (${data.category})`);
+        setTimeout(() => setEmotionStatusMessage(null), 4000);
+
+        return {
+          mood: data.primaryMood as ReflectionMood,
+          tags: newTags,
+          category: data.category as MoodCategory,
+          eqAnalysis: data.eqAnalysis
+        };
+      }
+    } catch (err) {
+      console.warn('Gemini emotion analysis error:', err);
+      setEmotionStatusMessage('Offline emotional insights applied.');
+      setTimeout(() => setEmotionStatusMessage(null), 3000);
+    } finally {
+      setIsAnalyzingEmotions(false);
+    }
+    return null;
+  }, [tags, selectedEmotions]);
+
   const handleManualSave = useCallback(async () => {
     if (isSaving) return;
+
+    let finalMood = mood || (selectedEmotions.length > 0 ? selectedEmotions[0] : undefined);
+    // Req 3: All selected emotions should be # hashtagged to the reflection
+    let finalTags = Array.from(new Set([
+      ...tags,
+      ...selectedEmotions
+    ])).filter(t => !STATE_OF_MIND_CATEGORIES.some(c => c.label.toLowerCase() === t.toLowerCase() || c.key.toLowerCase() === t.toLowerCase()));
+
+    // If user did not choose any emotions, analyze via Gemini assistance and apply to reflection
+    if (!finalMood && selectedEmotions.length === 0 && (content.trim().length > 0 || title.trim().length > 0)) {
+      const analysisResult = await analyzeEmotionsWithGemini(title, content);
+      if (analysisResult) {
+        finalMood = analysisResult.mood;
+        finalTags = analysisResult.tags;
+      }
+    }
+
     await onSaveEntry({
       id: currentEntry.id,
       title: title.trim() || 'Untitled Reflection',
       content: content.trim(),
-      mood,
+      mood: finalMood,
       intention,
       photos,
       location,
       entryDate: entryDate.trim() || undefined,
+      tags: finalTags,
       wordCount: words
     });
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus('idle'), 2500);
-  }, [currentEntry.id, title, content, mood, intention, photos, location, entryDate, words, onSaveEntry, isSaving]);
+  }, [currentEntry.id, title, content, mood, selectedEmotions, intention, photos, location, entryDate, tags, words, onSaveEntry, isSaving, analyzeEmotionsWithGemini]);
 
   // Keyboard shortcut: Cmd+S / Ctrl+S to save
   useEffect(() => {
@@ -293,16 +547,60 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
     onStartReflection(content, mode);
   };
 
-  const filteredMoods = moodFilter === 'all' 
-    ? MOODS 
-    : MOODS.filter(m => m.group === moodFilter);
+  const handleCategoryClick = (catKey: MoodCategory) => {
+    if (selectedCategory === catKey) {
+      // Toggle off category filter so user can view and pick emotions across all categories
+      setSelectedCategory(null);
+    } else {
+      // Filter to this category so user can view/select its emotions
+      setSelectedCategory(catKey);
+    }
+  };
+
+  const handleMoodSelect = (mKey: ReflectionMood) => {
+    if (selectedEmotions.includes(mKey)) {
+      // Unselect this emotion
+      const updated = selectedEmotions.filter(k => k !== mKey);
+      setSelectedEmotions(updated);
+      setMood(updated.length > 0 ? updated[0] : undefined);
+      // Remove from tags
+      setTags(prev => prev.filter(t => t.toLowerCase() !== mKey.toLowerCase()));
+    } else {
+      // Multi-select: user can select any number of emotions within a category or across categories (Req 3)
+      const updated = [...selectedEmotions, mKey];
+      setSelectedEmotions(updated);
+      setMood(mKey); // primary active mood
+      const mDef = MOODS.find(m => m.key === mKey);
+      if (mDef && !selectedCategory) {
+        setSelectedCategory(mDef.group);
+      }
+      // Req 3: All should be # hashtagged to the particular reflection
+      setTags(prev => {
+        const cleaned = prev.filter(t => 
+          !STATE_OF_MIND_CATEGORIES.some(c => c.label.toLowerCase() === t.toLowerCase() || c.key.toLowerCase() === t.toLowerCase())
+        );
+        if (!cleaned.some(t => t.toLowerCase() === mKey.toLowerCase())) {
+          return [...cleaned, mKey];
+        }
+        return cleaned;
+      });
+    }
+  };
+
+  const categoryEmotions = useMemo(() => {
+    if (!selectedCategory) return MOODS;
+    return MOODS.filter(m => m.group === selectedCategory);
+  }, [selectedCategory]);
+
+  const selectedCategoryDef = STATE_OF_MIND_CATEGORIES.find(c => c.key === selectedCategory);
+  const selectedIntentionDef = INTENTIONS.find(it => it.key === intention);
 
   return (
     <motion.div 
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="max-w-4xl mx-auto space-y-3 sm:space-y-3.5 pb-4"
+      className="w-full flex-1 flex flex-col min-h-0"
     >
       
       {/* Hidden File Input for Inserting Photos */}
@@ -315,147 +613,15 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
         className="hidden"
       />
 
-      {/* 1. STREAMLINED EMOTIONAL ATTUNEMENT / MOOD FRAME */}
-      {/* Compact low-profile header that fits cleanly within the single frame */}
-      <div className={`p-3 sm:p-3.5 rounded-2xl border transition-all duration-200 backdrop-blur-xl ${
-        isDark
-          ? 'bg-neutral-900/80 border-white/[0.08] shadow-sm'
-          : 'bg-white/90 border-black/[0.06] shadow-2xs'
-      }`}>
-        
-        {/* Mood Header & Group Filter */}
-        <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2">
-          <div className="flex items-center gap-1.5">
-            <Smile className="w-3.5 h-3.5 text-amber-500" />
-            <span className={`text-[11px] font-mono uppercase tracking-wider ${
-              isDark ? 'text-amber-400' : 'text-amber-700'
-            }`}>
-              Emotional Attunement
-            </span>
-          </div>
-
-          {/* Quick Group Tabs */}
-          <div className="flex items-center gap-1 text-[10px] font-mono">
-            {(['all', 'serene', 'contemplative', 'friction'] as const).map(tab => (
-              <button
-                key={tab}
-                onClick={() => setMoodFilter(tab)}
-                className={`px-2 py-0.5 rounded-full capitalize transition-all cursor-pointer ${
-                  moodFilter === tab
-                    ? isDark 
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold' 
-                      : 'bg-amber-100 text-amber-900 border border-amber-300 font-semibold'
-                    : isDark 
-                      ? 'text-neutral-400 hover:text-neutral-200' 
-                      : 'text-neutral-500 hover:text-neutral-800'
-                }`}
-              >
-                {tab === 'friction' ? 'Low & Friction' : tab}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Compact Mood Pills Grid */}
-        <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
-          {filteredMoods.map(m => {
-            const isSelected = mood === m.key;
-            return (
-              <button
-                key={m.key}
-                onClick={() => setMood(m.key)}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all cursor-pointer ${
-                  isSelected
-                    ? isDark
-                      ? 'bg-amber-500/25 text-amber-200 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.2)] font-semibold'
-                      : 'bg-amber-100 text-amber-900 border border-amber-400 shadow-2xs font-semibold'
-                    : isDark
-                      ? 'bg-neutral-950/60 text-neutral-400 border border-white/[0.06] hover:text-neutral-200'
-                      : 'bg-neutral-50 text-neutral-600 border border-neutral-200 hover:text-neutral-900'
-                }`}
-              >
-                <span className="text-xs leading-none">{m.icon}</span>
-                <span>{m.label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Intention Strip */}
-        <div className="mt-2 pt-2 border-t border-black/[0.05] dark:border-white/[0.05] flex items-center gap-1.5 overflow-x-auto scrollbar-none text-xs">
-          <span className={`font-mono uppercase text-[9px] tracking-wider shrink-0 flex items-center gap-1 ${
-            isDark ? 'text-neutral-400' : 'text-neutral-500'
-          }`}>
-            <Compass className={`w-3 h-3 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
-            <span>Intention:</span>
-          </span>
-          {INTENTIONS.map(it => (
-            <button
-              key={it.key}
-              onClick={() => setIntention(it.key)}
-              className={`px-2 py-0.5 rounded-full whitespace-nowrap transition-all text-[11px] font-medium cursor-pointer ${
-                intention === it.key
-                  ? isDark
-                    ? 'bg-neutral-100 text-neutral-950 font-semibold shadow-2xs'
-                    : 'bg-neutral-900 text-neutral-50 font-semibold shadow-2xs'
-                  : isDark
-                    ? 'text-neutral-400 hover:text-neutral-200 bg-neutral-950/50 border border-white/[0.06]'
-                    : 'text-neutral-600 hover:text-neutral-900 bg-neutral-100 border border-neutral-200'
-              }`}
-            >
-              <span>{it.label}</span>
-            </button>
-          ))}
-        </div>
-
-      </div>
-
-      {/* 2. MAIN SPIRAL NOTEBOOK WRITING SURFACE (Single-Frame Proportioned) */}
+      {/* SPIRAL NOTEBOOK PAPER PAGE */}
       <div 
         onPaste={handlePaste}
-        className={`relative rounded-3xl transition-all duration-300 ${
-          isDark
-            ? 'bg-neutral-950/90 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.85),2px_2px_0_1px_rgba(255,255,255,0.04)]'
-            : 'bg-stone-200/90 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.1),3px_3px_0_rgba(0,0,0,0.04)]'
-        } p-2 sm:p-2.5`}
+        className={`relative flex-1 p-3.5 sm:p-5 sm:pl-8 sm:pr-6 transition-colors duration-200 flex flex-col min-h-0 w-full max-w-full overflow-hidden ${
+          isDark 
+            ? 'bg-[#18181b] text-neutral-100' 
+            : 'bg-[#fdfbf7] text-neutral-900'
+        }`}
       >
-        
-        {/* Notebook Cover Layer & Spiral Spine */}
-        <div className="relative flex rounded-2xl overflow-hidden">
-          
-          {/* SPIRAL BINDING SPINE (Left Edge - Dynamically Scaling Double Wire-O Coils) */}
-          <div className={`relative w-8 sm:w-11 shrink-0 flex flex-col justify-around py-4 z-20 select-none ${
-            isDark 
-              ? 'bg-gradient-to-r from-neutral-950 via-neutral-900 to-neutral-800 border-r border-neutral-700/60 shadow-[inset_-3px_0_6px_rgba(0,0,0,0.5)]' 
-              : 'bg-gradient-to-r from-stone-300 via-stone-200 to-stone-100 border-r border-stone-300 shadow-[inset_-3px_0_6px_rgba(0,0,0,0.1)]'
-          }`}>
-            {Array.from({ length: 10 }).map((_, i) => (
-              <div key={i} className="relative flex items-center justify-center my-0.5">
-                {/* Punched hole */}
-                <div className={`w-2.5 sm:w-3 h-2.5 sm:h-3 rounded-[2px] shadow-inner ${
-                  isDark 
-                    ? 'bg-black border border-white/[0.05]' 
-                    : 'bg-stone-800/80 border border-black/30'
-                }`} />
-                
-                {/* Metallic Spiral Wire Loop */}
-                <div 
-                  className={`absolute h-2 sm:h-2.5 w-5 sm:w-8 -left-1 sm:-left-1.5 rounded-full transform -rotate-6 pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)] ${
-                    isDark
-                      ? 'bg-gradient-to-r from-neutral-600 via-neutral-300 to-neutral-700 border-t border-white/40'
-                      : 'bg-gradient-to-r from-stone-400 via-white to-stone-500 border-t border-white/80'
-                  }`}
-                />
-              </div>
-            ))}
-          </div>
-
-          {/* SPIRAL NOTEBOOK PAPER PAGE */}
-          <div className={`relative flex-1 p-4 sm:p-6 sm:pl-8 transition-colors duration-200 ${
-            isDark 
-              ? 'bg-[#18181b] text-neutral-100' 
-              : 'bg-[#fdfbf7] text-neutral-900'
-          }`}>
             
             {/* Perforated tear line on the left of the page */}
             <div className={`absolute top-0 bottom-0 left-0 w-px border-r-2 border-dashed ${
@@ -477,143 +643,500 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
               }}
             />
 
-            {/* NOTEBOOK HEADER: Date, Stationery Tools (Photos, Location, Voice), Metrics & Primary Save to Vault */}
-            <div className="relative z-10 flex flex-wrap items-center justify-between gap-2.5 mb-3 pb-2.5 border-b border-black/[0.06] dark:border-white/[0.08]">
+            {/* NOTEBOOK TOP ROW: Editable Date with Left/Right Arrows, Calendar Popover & Primary Save Button */}
+            <div className="relative z-20 flex flex-wrap items-center justify-between gap-3 mb-2.5 pb-2 border-b border-black/[0.06] dark:border-white/[0.08] shrink-0">
               
-              {/* Left Group: Reflection Date Picker & Stationery Tools */}
-              <div className="flex flex-wrap items-center gap-2">
-                
-                {/* Date Picker */}
-                <div className="flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-amber-500" />
+              {/* Date Switcher: Left arrow, Editable date picker, Right arrow, Candidate Month Calendar popover */}
+              <div className="relative flex items-center gap-1.5 sm:gap-2">
+                {/* Left arrow: switch to previous day */}
+                <button
+                  type="button"
+                  onClick={() => shiftDate(-1)}
+                  title="Switch to previous day"
+                  className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                    isDark
+                      ? 'bg-neutral-900 border-neutral-700 text-neutral-300 hover:text-white hover:bg-neutral-800'
+                      : 'bg-white border-stone-300 text-stone-700 hover:text-stone-900 hover:bg-stone-100 shadow-2xs'
+                  }`}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                {/* Editable Date Input with Clock Icon */}
+                <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border shadow-2xs ${
+                  isDark ? 'bg-neutral-900 border-neutral-700' : 'bg-white border-stone-300'
+                }`}>
+                  <Clock className={`w-3.5 h-3.5 shrink-0 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
                   <input
                     type="date"
-                    value={entryDate || new Date().toISOString().slice(0, 10)}
+                    value={effectiveDate}
                     onChange={(e) => setEntryDate(e.target.value)}
-                    className={`text-xs font-mono px-2 py-0.5 rounded-lg border outline-none cursor-pointer transition-colors ${
-                      isDark 
-                        ? 'bg-neutral-900 border-neutral-700 text-neutral-200 focus:border-amber-500' 
-                        : 'bg-white border-stone-300 text-neutral-800 focus:border-amber-500'
+                    title="Click or edit date"
+                    className={`text-xs sm:text-sm font-mono font-medium outline-none cursor-pointer bg-transparent ${
+                      isDark ? 'text-neutral-100' : 'text-neutral-900'
                     }`}
                   />
                 </div>
 
-                {/* Divider */}
-                <span className="text-neutral-400 opacity-40">|</span>
-
-                {/* STATIONERY ACTIONS TOOLBAR: Insert Photo, Tag Location, Voice Assistance */}
-                <div className="flex items-center gap-1.5">
-                  
-                  {/* 1. Insert Photos Button */}
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    title="Insert photo(s) into this reflection or paste from clipboard"
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
-                      photos.length > 0
-                        ? isDark
-                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                          : 'bg-amber-100 text-amber-900 border-amber-300'
-                        : isDark
-                          ? 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border-white/[0.08]'
-                          : 'bg-white hover:bg-stone-50 text-neutral-700 border-stone-300 shadow-2xs'
-                    }`}
-                  >
-                    <ImageIcon className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Photo</span>
-                    {photos.length > 0 && (
-                      <span className="w-4 h-4 rounded-full bg-amber-500 text-neutral-950 font-bold text-[10px] flex items-center justify-center ml-0.5">
-                        {photos.length}
-                      </span>
-                    )}
-                  </button>
-
-                  {/* 2. Tag Location Button (Google Maps Platform) */}
-                  <button
-                    type="button"
-                    onClick={() => setIsLocationModalOpen(true)}
-                    title="Tag a mindful location with Google Maps Platform"
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
-                      location
-                        ? isDark
-                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                          : 'bg-blue-50 text-blue-900 border-blue-300'
-                        : isDark
-                          ? 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border-white/[0.08]'
-                          : 'bg-white hover:bg-stone-50 text-neutral-700 border-stone-300 shadow-2xs'
-                    }`}
-                  >
-                    <MapPin className={`w-3.5 h-3.5 ${location ? 'text-blue-500' : 'text-amber-500'}`} />
-                    <span>{location ? location.name.slice(0, 16) + (location.name.length > 16 ? '...' : '') : 'Location'}</span>
-                  </button>
-
-                  {/* 3. Voice Assistance Button */}
-                  <button
-                    type="button"
-                    onClick={() => setIsVoiceModalOpen(true)}
-                    title="Speak reflection with real-time transcription and Gemini polish"
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 dark:text-rose-400 transition-all cursor-pointer shadow-2xs"
-                  >
-                    <Mic className="w-3.5 h-3.5" />
-                    <span>Speak</span>
-                  </button>
-
-                </div>
-
-              </div>
-
-              {/* Right Group: Real-time Word Metrics & Primary Save to Vault Button */}
-              <div className="flex items-center gap-2.5">
-                
-                {/* Word count & reading time */}
-                <div className={`text-[11px] font-mono flex items-center gap-1.5 ${
-                  isDark ? 'text-neutral-400' : 'text-neutral-500'
-                }`}>
-                  <span className="flex items-center gap-1">
-                    <FileText className="w-3 h-3 text-amber-500" />
-                    <span>{words}w</span>
-                  </span>
-                  <span>•</span>
-                  <span>{readingTime}m</span>
-                </div>
-
-                {/* Primary Save Vault Button */}
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
-                  onClick={handleManualSave}
-                  disabled={isSaving}
-                  title="Save reflection to encrypted vault (Cmd+S / Ctrl+S)"
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-medium border transition-all cursor-pointer shadow-2xs ${
-                    saveStatus === 'saved'
-                      ? isDark
-                        ? 'bg-emerald-500/25 text-emerald-300 border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
-                        : 'bg-emerald-100 text-emerald-800 border-emerald-400'
-                      : isDark
-                        ? 'bg-gradient-to-r from-amber-500/25 to-amber-600/25 hover:from-amber-500/35 hover:to-amber-600/35 text-amber-200 border-amber-500/40'
-                        : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white border-amber-600'
+                {/* Right arrow: switch to next day */}
+                <button
+                  type="button"
+                  onClick={() => shiftDate(1)}
+                  title="Switch to next day"
+                  className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                    isDark
+                      ? 'bg-neutral-900 border-neutral-700 text-neutral-300 hover:text-white hover:bg-neutral-800'
+                      : 'bg-white border-stone-300 text-stone-700 hover:text-stone-900 hover:bg-stone-100 shadow-2xs'
                   }`}
                 >
-                  {isSaving ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Saving...</span>
-                    </>
-                  ) : saveStatus === 'saved' ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="font-semibold">Saved</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-3.5 h-3.5" />
-                      <span>Save Vault</span>
-                      <span className="hidden sm:inline text-[9px] opacity-70">⌘S</span>
-                    </>
-                  )}
-                </motion.button>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+
+                {/* Calendar Icon Button: Click pops up Candidate Month Calendar */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsCalendarOpen(prev => !prev)}
+                    title="Open candidate month calendar to pick any date"
+                    aria-label="Open candidate month calendar"
+                    className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                      isCalendarOpen
+                        ? isDark
+                          ? 'bg-teal-500/20 text-teal-300 border-teal-500/50'
+                          : 'bg-teal-100 text-teal-900 border-teal-400'
+                        : isDark
+                          ? 'bg-neutral-900 border-neutral-700 text-neutral-300 hover:text-white hover:bg-neutral-800'
+                          : 'bg-white border-stone-300 text-stone-700 hover:text-stone-900 hover:bg-stone-100 shadow-2xs'
+                    }`}
+                  >
+                    <CalendarIcon className="w-4 h-4" />
+                  </button>
+
+                  {/* Popover Candidate Month Calendar */}
+                  <CandidateMonthCalendar
+                    isOpen={isCalendarOpen}
+                    onClose={() => setIsCalendarOpen(false)}
+                    selectedDate={effectiveDate}
+                    onSelectDate={(newDate) => {
+                      setEntryDate(newDate);
+                      setIsCalendarOpen(false);
+                    }}
+                    existingEntryDates={existingEntryDatesSet}
+                  />
+                </div>
+
+                {/* In vault indicator for selected date */}
+                {existingEntryForSelectedDate && onSelectDateEntry && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectDateEntry(existingEntryForSelectedDate)}
+                    title="Load this date's reflection from your vault"
+                    className={`hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono border transition-colors cursor-pointer ${
+                      isDark 
+                        ? 'bg-teal-950/40 border-teal-500/30 text-teal-300 hover:bg-teal-900/50' 
+                        : 'bg-teal-50 border-teal-300 text-teal-800 hover:bg-teal-100'
+                    }`}
+                  >
+                    <Bookmark className="w-3 h-3 text-teal-500" />
+                    <span className="truncate max-w-[130px]">In vault: {existingEntryForSelectedDate.title}</span>
+                  </button>
+                )}
               </div>
 
+              {/* Primary Save Vault Button */}
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.96 }}
+                onClick={handleManualSave}
+                disabled={isSaving}
+                title="Save reflection to encrypted vault (Cmd+S / Ctrl+S)"
+                className={`flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-4 py-1.5 rounded-xl text-xs sm:text-sm font-medium border transition-all cursor-pointer shadow-2xs shrink-0 ${
+                  saveStatus === 'saved'
+                    ? isDark
+                      ? 'bg-emerald-500/25 text-emerald-300 border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                      : 'bg-emerald-100 text-emerald-800 border-emerald-400'
+                    : isDark
+                      ? 'bg-gradient-to-r from-teal-600/30 to-emerald-600/30 hover:from-teal-600/40 hover:to-emerald-600/40 text-teal-200 border-teal-500/40 shadow-2xs'
+                      : 'bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white border-teal-800 shadow-sm'
+                }`}
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : saveStatus === 'saved' ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span className="font-semibold">Saved</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save Vault</span>
+                    <span className="hidden sm:inline text-[10px] opacity-70">⌘S</span>
+                  </>
+                )}
+              </motion.button>
+            </div>
+
+            {/* REFLECTION CONTEXT BLOCK: State of Mind, Intention, and Stationery Tools */}
+            <div className="relative z-10 pl-2 sm:pl-3 mb-2.5 shrink-0">
+              <div className={`p-2.5 sm:p-3 rounded-2xl border transition-all ${
+                isDark 
+                  ? 'bg-neutral-900/60 border-white/[0.08] shadow-sm' 
+                  : 'bg-stone-100/80 border-stone-300/70 shadow-2xs'
+              }`}>
+                {/* 1. State of Mind Header: 4 Categories, None Selected by Default */}
+                <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Smile className={`w-3.5 h-3.5 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+                    <span className={`text-xs sm:text-[13px] font-mono uppercase tracking-wider font-semibold ${
+                      isDark ? 'text-teal-300' : 'text-teal-900'
+                    }`}>
+                      State of Mind
+                    </span>
+                    {selectedCategoryDef && (
+                      <span className={`inline-flex items-center gap-1 text-xs font-mono px-2 py-0.5 rounded-full border ${
+                        isDark 
+                          ? 'bg-teal-500/15 border-teal-500/30 text-teal-300' 
+                          : 'bg-teal-50 border-teal-200 text-teal-900 font-medium'
+                      }`}>
+                        <span>Category: {selectedCategoryDef.label}</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCategory(null)}
+                          className="hover:text-rose-400 cursor-pointer ml-0.5"
+                          title="View all categories"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* AI Emotional Analysis Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => analyzeEmotionsWithGemini(title, content)}
+                    disabled={isAnalyzingEmotions || (!title.trim() && !content.trim())}
+                    title="Gemini will analyze your writing to detect your state of mind and emotional quotient"
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border transition-all cursor-pointer ${
+                      isAnalyzingEmotions
+                        ? isDark
+                          ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+                          : 'bg-teal-100 text-teal-800 border-teal-300'
+                        : (!title.trim() && !content.trim())
+                        ? 'opacity-40 cursor-not-allowed border-transparent text-neutral-400'
+                        : isDark
+                          ? 'bg-neutral-800/80 hover:bg-neutral-700 text-neutral-200 border-neutral-700 hover:border-teal-500/40'
+                          : 'bg-white hover:bg-stone-50 text-stone-700 border-stone-200 shadow-2xs hover:border-teal-300'
+                    }`}
+                  >
+                    <Sparkles className={`w-3 h-3 text-teal-500 ${isAnalyzingEmotions ? 'animate-spin' : ''}`} />
+                    <span>{isAnalyzingEmotions ? 'Analyzing EQ...' : 'Gemini Emotional Analysis'}</span>
+                  </button>
+                </div>
+
+                {/* 4 State of Mind Categories (same frame size as Intention categories, full text displayed) */}
+                <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 mb-2">
+                  {STATE_OF_MIND_CATEGORIES.map(cat => {
+                    const isSelected = selectedCategory === cat.key;
+                    return (
+                      <button
+                        key={cat.key}
+                        type="button"
+                        onClick={() => handleCategoryClick(cat.key)}
+                        className={`px-2.5 py-0.5 sm:py-1 rounded-full whitespace-nowrap transition-all text-xs font-medium cursor-pointer ${
+                          isSelected
+                            ? isDark
+                              ? 'bg-teal-500/20 text-teal-200 border border-teal-500/40 shadow-[0_0_12px_rgba(20,184,166,0.25)] font-semibold'
+                              : 'bg-teal-100 text-teal-900 border border-teal-400 shadow-2xs font-semibold'
+                            : isDark
+                              ? 'text-neutral-400 hover:text-neutral-200 bg-neutral-950/50 border border-white/[0.06] hover:border-teal-500/30'
+                              : 'text-neutral-600 hover:text-neutral-900 bg-white/80 border border-stone-200 hover:border-teal-300 shadow-2xs'
+                        }`}
+                      >
+                        <span>{cat.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* DEDICATED FRAME LISTING EMOTIONS (Req 3: Multi-select within or across categories, all hashtagged) */}
+                <div className={`p-2.5 rounded-xl border transition-all mb-2.5 ${
+                  isDark 
+                    ? 'bg-neutral-950/60 border-white/[0.08]' 
+                    : 'bg-white/90 border-stone-200/90 shadow-2xs'
+                }`}>
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-[11px] font-mono uppercase tracking-wider font-semibold ${
+                        isDark ? 'text-teal-300' : 'text-teal-800'
+                      }`}>
+                        {selectedCategory
+                          ? `Emotions · ${selectedCategoryDef?.label}`
+                          : 'Emotions · All Categories (Pick any within or across categories)'}
+                      </span>
+                      {selectedEmotions.length > 0 && (
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-full border ${
+                          isDark 
+                            ? 'bg-teal-500/20 text-teal-200 border-teal-500/40' 
+                            : 'bg-teal-100 text-teal-900 border-teal-300 font-semibold'
+                        }`}>
+                          <span>{selectedEmotions.length} hashtagged</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedEmotions([]);
+                              setMood(undefined);
+                              setTags(prev => prev.filter(t => !MOODS.some(m => m.key.toLowerCase() === t.toLowerCase())));
+                            }}
+                            className="hover:text-rose-500 cursor-pointer ml-0.5"
+                            title="Clear all emotion hashtags"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </span>
+                      )}
+                    </div>
+
+                    {selectedCategory && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCategory(null)}
+                        className={`text-[10px] font-mono hover:underline cursor-pointer font-medium ${
+                          isDark ? 'text-teal-400 hover:text-teal-300' : 'text-teal-700 hover:text-teal-900'
+                        }`}
+                      >
+                        View all categories
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Emotion Pills: user can select any number of emotions within or across categories */}
+                  <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
+                    {categoryEmotions.map(m => {
+                      const isSelected = selectedEmotions.includes(m.key);
+                      return (
+                        <button
+                          key={m.key}
+                          type="button"
+                          onClick={() => handleMoodSelect(m.key)}
+                          className={`px-2.5 py-0.5 sm:py-1 rounded-full whitespace-nowrap transition-all text-xs font-medium cursor-pointer flex items-center gap-1 ${
+                            isSelected
+                              ? isDark
+                                ? 'bg-teal-500/30 text-teal-100 border border-teal-500/60 shadow-[0_0_10px_rgba(20,184,166,0.3)] font-semibold'
+                                : 'bg-teal-600 text-white border border-teal-700 shadow-2xs font-semibold'
+                              : isDark
+                                ? 'bg-neutral-900 text-neutral-300 border border-neutral-700/80 hover:text-white hover:border-teal-500/40'
+                                : 'bg-white text-stone-700 border border-stone-300/80 hover:text-stone-900 hover:border-teal-300 shadow-2xs'
+                          }`}
+                        >
+                          <span>{isSelected ? `#${m.label}` : m.label}</span>
+                          {isSelected && <Check className="w-3 h-3 text-emerald-300 shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Real-time Emotion Status Message */}
+                {emotionStatusMessage && (
+                  <div className={`mb-2 px-2.5 py-1 rounded-lg text-xs font-mono flex items-center gap-1.5 ${
+                    isDark ? 'bg-teal-950/50 text-teal-300 border border-teal-500/30' : 'bg-teal-50 text-teal-800 border border-teal-200'
+                  }`}>
+                    <Sparkles className="w-3.5 h-3.5 text-teal-500 shrink-0" />
+                    <span>{emotionStatusMessage}</span>
+                  </div>
+                )}
+
+                {/* EQ Mindful Insight Card if generated */}
+                {eqInsight && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`mb-2 p-2.5 rounded-xl border text-xs flex items-start gap-2.5 ${
+                      isDark
+                        ? 'bg-teal-950/30 border-teal-500/20 text-teal-200'
+                        : 'bg-teal-50/80 border-teal-200 text-teal-900'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-teal-500 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 font-mono text-[11px] font-semibold mb-0.5">
+                        <span>EQ Insight: {eqInsight.emotionalQuotient}</span>
+                        {eqInsight.tone && <span className="opacity-70 font-normal">• {eqInsight.tone}</span>}
+                      </div>
+                      <p className="text-[11px] opacity-85 leading-relaxed">{eqInsight.mindfulObservation}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEqInsight(null)}
+                      className="p-1 hover:opacity-100 opacity-60 text-xs cursor-pointer"
+                      title="Dismiss"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </motion.div>
+                )}
+
+                {/* Emotional Tags saved with reflection (Req 3: All should be # hashtagged to the particular reflection) */}
+                {tags.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2 px-1">
+                    <Tag className={`w-3.5 h-3.5 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+                    <span className={`text-[10px] font-mono uppercase tracking-wider font-semibold ${
+                      isDark ? 'text-neutral-400' : 'text-neutral-500'
+                    }`}>
+                      Emotion Hashtags:
+                    </span>
+                    {tags.map((t, idx) => (
+                      <span
+                        key={idx}
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-mono border ${
+                          isDark
+                            ? 'bg-neutral-800 text-teal-300 border-neutral-700'
+                            : 'bg-white text-teal-900 border-teal-200 shadow-2xs font-medium'
+                        }`}
+                      >
+                        <span>#{t}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTags(prev => prev.filter((_, i) => i !== idx));
+                            setSelectedEmotions(prev => prev.filter(e => e.toLowerCase() !== t.toLowerCase()));
+                            if (mood === t) {
+                              const remaining = selectedEmotions.filter(e => e.toLowerCase() !== t.toLowerCase());
+                              setMood(remaining.length > 0 ? remaining[0] : undefined);
+                            }
+                          }}
+                          className="hover:text-rose-500 cursor-pointer ml-0.5"
+                          title={`Remove #${t} hashtag`}
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* 2. Intention Header */}
+                <div className="pt-2 border-t border-black/[0.05] dark:border-white/[0.05]">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 mb-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <Compass className={`w-3.5 h-3.5 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+                      <span className={`text-xs sm:text-[13px] font-mono uppercase tracking-wider font-semibold ${
+                        isDark ? 'text-teal-300' : 'text-teal-900'
+                      }`}>
+                        Intention
+                      </span>
+                      {selectedIntentionDef && (
+                        <span className={`hidden sm:inline-flex items-center text-xs font-mono px-2 py-0.5 rounded-full border ${
+                          isDark 
+                            ? 'bg-teal-500/15 border-teal-500/30 text-teal-300' 
+                            : 'bg-teal-50 border-teal-200 text-teal-900 font-medium'
+                        }`}>
+                          <span>{selectedIntentionDef.label}</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Clean Intention Pills */}
+                  <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 mb-2">
+                    {INTENTIONS.map(it => {
+                      const isSelected = intention === it.key;
+                      return (
+                        <button
+                          key={it.key}
+                          type="button"
+                          onClick={() => setIntention(it.key)}
+                          className={`px-2.5 py-0.5 sm:py-1 rounded-full whitespace-nowrap transition-all text-xs font-medium cursor-pointer ${
+                            isSelected
+                              ? isDark
+                                ? 'bg-teal-500/20 text-teal-200 border border-teal-500/40 shadow-[0_0_12px_rgba(20,184,166,0.25)] font-semibold'
+                                : 'bg-teal-100 text-teal-900 border border-teal-400 shadow-2xs font-semibold'
+                              : isDark
+                                ? 'text-neutral-400 hover:text-neutral-200 bg-neutral-950/50 border border-white/[0.06] hover:border-teal-500/30'
+                                : 'text-neutral-600 hover:text-neutral-900 bg-white/80 border border-stone-200 hover:border-teal-300 shadow-2xs'
+                          }`}
+                        >
+                          <span>{it.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. Stationery Actions (Add Photo, Location, Speak) Placed Below Intention */}
+                <div className="pt-2 border-t border-black/[0.05] dark:border-white/[0.05] flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    {/* Insert Photo Button */}
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      title="Insert photo(s) into this reflection or paste from clipboard"
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs sm:text-sm font-medium border transition-all cursor-pointer ${
+                        photos.length > 0
+                          ? isDark
+                            ? 'bg-teal-500/20 text-teal-200 border-teal-500/40'
+                            : 'bg-teal-100 text-teal-900 border-teal-300 font-semibold'
+                          : isDark
+                            ? 'bg-neutral-950/60 hover:bg-neutral-900 text-neutral-300 border-white/[0.08]'
+                            : 'bg-white hover:bg-stone-50 text-neutral-700 border-stone-300 shadow-2xs'
+                      }`}
+                    >
+                      <ImageIcon className={`w-3.5 h-3.5 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+                      <span>Add Photo</span>
+                      {photos.length > 0 && (
+                        <span className="w-4 h-4 rounded-full bg-teal-600 text-white font-bold text-[10px] flex items-center justify-center ml-0.5">
+                          {photos.length}
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Tag Location Button */}
+                    <button
+                      type="button"
+                      onClick={() => setIsLocationModalOpen(true)}
+                      title="Tag a mindful location with Google Maps Platform"
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs sm:text-sm font-medium border transition-all cursor-pointer ${
+                        location
+                          ? isDark
+                            ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                            : 'bg-blue-50 text-blue-900 border-blue-300'
+                          : isDark
+                            ? 'bg-neutral-950/60 hover:bg-neutral-900 text-neutral-300 border-white/[0.08]'
+                            : 'bg-white hover:bg-stone-50 text-neutral-700 border-stone-300 shadow-2xs'
+                      }`}
+                    >
+                      <MapPin className={`w-3.5 h-3.5 ${location ? 'text-blue-500' : isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+                      <span>{location ? location.name.slice(0, 18) + (location.name.length > 18 ? '...' : '') : 'Location'}</span>
+                    </button>
+
+                    {/* Speak / Voice Reflection Button */}
+                    <button
+                      type="button"
+                      onClick={() => setIsVoiceModalOpen(true)}
+                      title="Speak reflection with real-time transcription and Gemini polish"
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs sm:text-sm font-medium border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 dark:text-rose-400 transition-all cursor-pointer shadow-2xs"
+                    >
+                      <Mic className="w-3.5 h-3.5" />
+                      <span>Speak</span>
+                    </button>
+                  </div>
+
+                  {/* Word count & reading time metrics */}
+                  <div className={`text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded-lg ${
+                    isDark ? 'text-neutral-400 bg-neutral-950/40' : 'text-neutral-600 bg-stone-200/50'
+                  }`}>
+                    <FileText className={`w-3 h-3 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+                    <span>{words}w</span>
+                    <span>•</span>
+                    <span>{readingTime}m</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Tagged Location Pill Banner (if tagged) */}
@@ -690,8 +1213,8 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
                   onClick={() => fileInputRef.current?.click()}
                   className={`w-16 h-16 rounded-xl border border-dashed flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer shrink-0 ${
                     isDark
-                      ? 'border-white/[0.15] text-neutral-400 hover:text-white hover:border-amber-500/50'
-                      : 'border-stone-300 text-stone-500 hover:text-stone-900 hover:border-amber-500'
+                      ? 'border-white/[0.15] text-neutral-400 hover:text-white hover:border-teal-500/50'
+                      : 'border-stone-300 text-stone-500 hover:text-stone-900 hover:border-teal-500'
                   }`}
                   title="Add more photos"
                 >
@@ -702,30 +1225,29 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
             )}
 
             {/* Notebook Title Input */}
-            <div className="relative z-10 pl-2 sm:pl-3 mb-2">
+            <div className="relative z-10 pl-2 sm:pl-3 mb-1.5 shrink-0">
               <input
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Title of this reflection..."
                 maxLength={200}
-                className={`w-full bg-transparent font-serif text-xl sm:text-2xl focus:outline-none border-b pb-1.5 transition-colors ${
+                className={`w-full bg-transparent font-serif text-xl sm:text-2xl focus:outline-none border-b pb-1 transition-colors ${
                   isDark
-                    ? 'text-neutral-100 placeholder:text-neutral-600 border-white/[0.08] focus:border-amber-500/50'
-                    : 'text-neutral-900 placeholder:text-stone-400 border-stone-200 focus:border-amber-500'
+                    ? 'text-neutral-100 placeholder:text-neutral-600 border-white/[0.08] focus:border-teal-500/50'
+                    : 'text-neutral-900 placeholder:text-stone-400 border-stone-200 focus:border-teal-600'
                 }`}
               />
             </div>
 
-            {/* Notebook Textarea Writing Area with responsive height and inline dictation button */}
-            <div className="relative z-10 pl-2 sm:pl-3">
+            {/* Notebook Textarea Writing Area with full available height and inline dictation button */}
+            <div className="relative z-10 pl-2 sm:pl-3 flex-1 flex flex-col min-h-0">
               <textarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 placeholder="Write freely in your spiral notebook. Pour out thoughts, or tap Speak to dictate your voice notes..."
-                rows={6}
                 maxLength={50000}
-                className={`w-full bg-transparent text-sm sm:text-base leading-[30px] focus:outline-none resize-none font-light selection:bg-amber-500/25 min-h-[140px] max-h-[220px] overflow-y-auto ${
+                className={`w-full flex-1 bg-transparent text-base sm:text-lg leading-[30px] sm:leading-[34px] focus:outline-none resize-none font-light selection:bg-teal-500/20 selection:text-teal-200 min-h-[100px] sm:min-h-[140px] overflow-y-auto ${
                   isDark
                     ? 'text-neutral-200 placeholder:text-neutral-600'
                     : 'text-neutral-800 placeholder:text-stone-400'
@@ -733,7 +1255,7 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
               />
 
               {/* Quick Inline Dictation Toggle in corner of notebook paper */}
-              <div className="flex items-center justify-end gap-2 pt-1">
+              <div className="flex items-center justify-end gap-2 pt-0.5 shrink-0">
                 {isInlineListening && (
                   <span className="text-[10px] font-mono text-rose-500 animate-pulse flex items-center gap-1">
                     <span className="w-2 h-2 rounded-full bg-rose-500" />
@@ -752,13 +1274,13 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
                         : 'bg-white hover:bg-stone-100 text-neutral-600 hover:text-neutral-900 border-stone-300 shadow-2xs'
                   }`}
                 >
-                  {isInlineListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-amber-500" />}
+                  {isInlineListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className={`w-3.5 h-3.5 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />}
                 </button>
               </div>
             </div>
 
-            {/* NOTEBOOK FOOTER: Compact Sparks Trigger & AI Action Buttons in Single Visible Row */}
-            <div className={`relative z-10 pt-3 mt-2 border-t flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5 ${
+            {/* NOTEBOOK FOOTER: Sparks Trigger & AI Action Buttons Fully Visible In Frame */}
+            <div className={`relative z-10 pt-2.5 mt-auto border-t flex flex-wrap items-center justify-between gap-2 shrink-0 ${
               isDark ? 'border-white/[0.08]' : 'border-stone-200'
             }`}>
               
@@ -768,30 +1290,30 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
                 whileTap={{ scale: 0.99 }}
                 onClick={onOpenSparks}
                 type="button"
-                className={`group flex items-center gap-2.5 px-3 py-1.5 rounded-xl border transition-all text-left cursor-pointer shadow-2xs ${
+                className={`group flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all text-left cursor-pointer shadow-2xs shrink-0 ${
                   isDark
-                    ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-200'
-                    : 'bg-amber-50/90 hover:bg-amber-100/80 border-amber-200 text-amber-900'
+                    ? 'bg-teal-500/10 hover:bg-teal-500/20 border-teal-500/30 text-teal-200'
+                    : 'bg-teal-50/90 hover:bg-teal-100/80 border-teal-200 text-teal-950'
                 }`}
               >
-                <div className="w-6 h-6 rounded-lg bg-amber-500/20 group-hover:bg-amber-500 text-amber-500 group-hover:text-white flex items-center justify-center shrink-0 transition-all">
-                  <Lightbulb className="w-3.5 h-3.5" />
+                <div className="w-5 h-5 rounded-lg bg-teal-500/20 group-hover:bg-teal-600 text-teal-600 dark:text-teal-400 group-hover:text-white flex items-center justify-center shrink-0 transition-all">
+                  <Lightbulb className="w-3 h-3" />
                 </div>
-                <div className="flex items-center gap-1.5 text-xs font-medium">
+                <div className="flex items-center gap-1.5 text-xs font-medium whitespace-nowrap">
                   <span>Need a spark? Contemplative Questions</span>
-                  <ArrowRight className="w-3 h-3 text-amber-500 group-hover:translate-x-0.5 transition-transform" />
+                  <ArrowRight className={`w-3 h-3 ${isDark ? 'text-teal-400' : 'text-teal-600'} group-hover:translate-x-0.5 transition-transform`} />
                 </div>
               </motion.button>
 
-              {/* AI Thought Actions Deck */}
-              <div className="flex flex-wrap items-center gap-1.5">
+              {/* AI Thought Actions Deck - Fully Visible Without Truncation */}
+              <div className="flex flex-wrap items-center gap-1.5 shrink-0 max-w-full">
                 
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => handleLaunchReflection('reflect')}
                   title="Reflect deeply with Gemini AI"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-neutral-950 text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Reflect with Gemini</span>
@@ -802,7 +1324,7 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
                   whileTap={{ scale: 0.97 }}
                   onClick={() => handleLaunchReflection('socratic')}
                   title="Socratic Inquiry Mirror"
-                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-all cursor-pointer whitespace-nowrap ${
                     isDark
                       ? 'bg-neutral-900 hover:bg-neutral-800 text-neutral-200 border-white/[0.08]'
                       : 'bg-white hover:bg-stone-50 text-neutral-800 border-stone-300 shadow-2xs'
@@ -817,13 +1339,13 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
                   whileTap={{ scale: 0.97 }}
                   onClick={() => handleLaunchReflection('unpack')}
                   title="Unpack Emotional Friction"
-                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-all cursor-pointer whitespace-nowrap ${
                     isDark
                       ? 'bg-neutral-900 hover:bg-neutral-800 text-neutral-200 border-white/[0.08]'
                       : 'bg-white hover:bg-stone-50 text-neutral-800 border-stone-300 shadow-2xs'
                   }`}
                 >
-                  <Zap className="w-3 h-3 text-amber-500" />
+                  <Zap className={`w-3 h-3 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
                   <span>Unpack</span>
                 </motion.button>
 
@@ -833,7 +1355,7 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
                   onClick={() => onSummarize(title || 'Reflection', content)}
                   disabled={!content.trim()}
                   title="Distill Structured Summary"
-                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-all disabled:opacity-40 cursor-pointer ${
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-all disabled:opacity-40 cursor-pointer whitespace-nowrap ${
                     isDark
                       ? 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border-white/[0.08]'
                       : 'bg-white hover:bg-stone-50 text-neutral-700 border-stone-300 shadow-2xs'
@@ -848,10 +1370,6 @@ export const JournalEditor: React.FC<JournalEditorProps> = ({
             </div>
 
           </div>
-
-        </div>
-
-      </div>
 
       {/* Google Maps Location Tagger Modal */}
       <LocationTaggerModal
