@@ -8,7 +8,9 @@ import {
   Sun, 
   Moon,
   PanelLeft,
-  PanelLeftClose
+  PanelLeftClose,
+  Bell,
+  Sliders
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -16,20 +18,26 @@ import { SanctuaryAmbienceControl } from './SanctuaryAmbienceControl';
 
 interface NavbarProps {
   user: UserProfile | null;
+  userRole?: 'user' | 'admin' | 'super_admin';
   activeTab: 'journal' | 'conversations' | 'archive' | 'calendar' | 'landscape';
   onSignIn: () => void;
   onSignOut: () => void;
   onOpenSparks: () => void;
+  onOpenNotifications?: () => void;
+  onOpenAdmin?: () => void;
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   user,
+  userRole,
   activeTab,
   onSignIn,
   onSignOut,
   onOpenSparks,
+  onOpenNotifications,
+  onOpenAdmin,
   isSidebarCollapsed,
   onToggleSidebar
 }) => {
@@ -214,12 +222,44 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                     </div>
 
+                    <div className="space-y-1 mb-1.5">
+                      {onOpenNotifications && (
+                        <button
+                          onClick={() => {
+                            setShowUserMenu(false);
+                            onOpenNotifications();
+                          }}
+                          className={`w-full flex items-center gap-2 px-3 py-2 text-xs rounded-xl transition-colors font-medium cursor-pointer ${
+                            isDark ? 'text-neutral-300 hover:bg-white/5' : 'text-neutral-700 hover:bg-black/5'
+                          }`}
+                        >
+                          <Bell className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Alerts & Webhooks</span>
+                        </button>
+                      )}
+
+                      {(userRole === 'admin' || userRole === 'super_admin') && onOpenAdmin && (
+                        <button
+                          onClick={() => {
+                            setShowUserMenu(false);
+                            onOpenAdmin();
+                          }}
+                          className={`w-full flex items-center gap-2 px-3 py-2 text-xs rounded-xl transition-colors font-medium cursor-pointer ${
+                            isDark ? 'text-neutral-300 hover:bg-white/5' : 'text-neutral-700 hover:bg-black/5'
+                          }`}
+                        >
+                          <Shield className="w-3.5 h-3.5 text-teal-400" />
+                          <span>Admin & RBAC Panel</span>
+                        </button>
+                      )}
+                    </div>
+
                     <button
                       onClick={() => {
                         setShowUserMenu(false);
                         onSignOut();
                       }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors font-medium cursor-pointer"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors font-medium cursor-pointer border-t border-black/5 dark:border-white/5 pt-2"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                       <span>Sign Out</span>

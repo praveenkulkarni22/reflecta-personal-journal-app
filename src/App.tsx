@@ -9,8 +9,11 @@ import { CalendarView } from './components/CalendarView';
 import { NotebookPageFlipper } from './components/NotebookPageFlipper';
 import { SummaryModal } from './components/SummaryModal';
 import { InnerLandscapeModal } from './components/InnerLandscapeModal';
+import { InnerLandscapeView } from './components/InnerLandscapeView';
 import { FlipbookReader } from './components/FlipbookReader';
 import { PromptSparkModal } from './components/PromptSparkModal';
+import { AdminDashboardModal } from './components/AdminDashboardModal';
+import { NotificationSettingsModal } from './components/NotificationSettingsModal';
 import { ThankYouPage } from './components/ThankYouPage';
 import { InteractiveBackground } from './components/InteractiveBackground';
 import { useTheme } from './context/ThemeContext';
@@ -95,6 +98,8 @@ export default function App() {
   const [isLandscapeModalOpen, setIsLandscapeModalOpen] = useState(false);
   const [isFlipbookOpen, setIsFlipbookOpen] = useState(false);
   const [isSparksOpen, setIsSparksOpen] = useState(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [isNotificationsModalOpen, setIsNotificationsModalOpen] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -110,7 +115,8 @@ export default function App() {
           email: firebaseUser.email,
           displayName: firebaseUser.displayName,
           photoURL: firebaseUser.photoURL,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          role: 'user'
         };
         setUser(profile);
         setAuthNotice(null);
@@ -119,8 +125,20 @@ export default function App() {
         try {
           await syncUserProfile(profile);
           await loadUserData(firebaseUser.uid);
+          
+          // Verify role with server RBAC engine
+          const token = await getCurrentUserToken();
+          if (token) {
+            const roleRes = await fetch('/api/auth/me', {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            if (roleRes.ok) {
+              const roleData = await roleRes.json();
+              setUser(prev => prev ? { ...prev, role: roleData.role || 'user' } : null);
+            }
+          }
         } catch (err) {
-          console.warn('Failed to sync profile / load user data:', err);
+          console.warn('Failed to sync profile / load user data / verify role:', err);
         }
       } else {
         setUser(null);
@@ -259,6 +277,29 @@ export default function App() {
         return [saved, ...prev];
       });
       showToast('Reflection safely stored in your vault.');
+
+      // Asynchronously trigger server-side notification classification pipeline
+      (async () => {
+        try {
+          const token = await getCurrentUserToken();
+          if (token && saved.id) {
+            fetch('/api/notifications/classify-and-trigger', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                journalId: saved.id,
+                title: saved.title,
+                content: saved.content
+              })
+            }).catch(err => console.debug('Background notification trigger notice:', err));
+          }
+        } catch (e) {
+          // Non-blocking background notification error
+        }
+      })();
     } catch (err: any) {
       console.error('Error saving journal:', err);
       showToast('Failed to save to cloud vault. Stored locally.');
@@ -521,7 +562,6 @@ export default function App() {
         generatedAt: new Date().toISOString(),
         entryCountAnalyzed: journals.length,
         corePillars: Array.isArray(landscapePayload.corePillars) ? landscapePayload.corePillars : [],
-        emotionalCadence: Array.isArray(landscapePayload.emotionalCadence) ? landscapePayload.emotionalCadence : [],
         growthVectors: Array.isArray(landscapePayload.growthVectors) ? landscapePayload.growthVectors : [],
         personalMantra: landscapePayload.personalMantra || 'I give myself permission to pause, breathe, and trust my journey.',
         contemplativeInquiry: landscapePayload.contemplativeInquiry || 'What brings you the deepest sense of peace today?'
@@ -635,18 +675,15 @@ export default function App() {
       <div className="relative z-10 flex min-h-screen">
         {/* Side Frame (Sidebar) */}
         <Sidebar
+          userRole={user?.role || 'user'}
           activeTab={activeTab}
-          setActiveTab={(tab) => {
-            if (tab === 'landscape') {
-              setIsLandscapeModalOpen(true);
-            } else {
-              setActiveTab(tab);
-            }
-          }}
-          onOpenLandscape={() => setIsLandscapeModalOpen(true)}
+          setActiveTab={setActiveTab}
+          onOpenLandscape={() => setActiveTab('landscape')}
           onOpenFlipbook={() => setIsFlipbookOpen(true)}
+          onOpenNotifications={() => setIsNotificationsModalOpen(true)}
+          onOpenAdmin={() => setIsAdminModalOpen(true)}
           isFlipbookOpen={isFlipbookOpen}
-          isLandscapeOpen={isLandscapeModalOpen}
+          isLandscapeOpen={activeTab === 'landscape'}
           onNewReflection={() => {
             setCurrentEntry({
               title: '',
@@ -670,10 +707,13 @@ export default function App() {
           {/* Navigation Header */}
           <Navbar
             user={user}
+            userRole={user?.role || 'user'}
             activeTab={activeTab}
             onSignIn={handleSignIn}
             onSignOut={handleSignOut}
             onOpenSparks={() => setIsSparksOpen(true)}
+            onOpenNotifications={() => setIsNotificationsModalOpen(true)}
+            onOpenAdmin={() => setIsAdminModalOpen(true)}
             isSidebarCollapsed={isSidebarCollapsed}
             onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           />
@@ -782,6 +822,15 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {activeTab === 'landscape' && (
+                <InnerLandscapeView
+                  synthesis={landscapeSynthesis}
+                  entries={journals}
+                  onSynthesize={handleSynthesizeLandscape}
+                  isSynthesizing={isSynthesizing}
+                />
+              )}
             </NotebookPageFlipper>
           </main>
         </div>
@@ -832,6 +881,17 @@ export default function App() {
         isOpen={isSparksOpen}
         onClose={() => setIsSparksOpen(false)}
         onSelectSpark={handleSelectSpark}
+      />
+
+      <NotificationSettingsModal
+        isOpen={isNotificationsModalOpen}
+        onClose={() => setIsNotificationsModalOpen(false)}
+      />
+
+      <AdminDashboardModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        userRole={user?.role || 'user'}
       />
 
       {/* Accessible Toast Notification */}

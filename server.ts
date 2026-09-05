@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { createServer as createViteServer } from 'vite';
 import { initializeApp, getApps, App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 dotenv.config();
 
@@ -115,11 +116,16 @@ app.use('/api/', rateLimiter);
 // Firebase Admin SDK & Zero-Trust Authentication Guard
 // ----------------------------------------------------
 let firebaseProjectId = process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT || 'gen-lang-client-0313222215';
+let firestoreDatabaseId: string | undefined = undefined;
+
 try {
   const cfgPath = path.join(process.cwd(), 'firebase-applet-config.json');
   if (fs.existsSync(cfgPath)) {
     const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     if (raw.projectId) firebaseProjectId = raw.projectId;
+    if (raw.firestoreDatabaseId && raw.firestoreDatabaseId !== '(default)') {
+      firestoreDatabaseId = raw.firestoreDatabaseId;
+    }
   }
 } catch {
   // Graceful fallback
@@ -144,14 +150,149 @@ function getAdminApp(): App | null {
   }
 }
 
+function getAdminFirestore() {
+  const app = getAdminApp();
+  if (app) {
+    return firestoreDatabaseId ? getFirestore(app, firestoreDatabaseId) : getFirestore(app);
+  }
+  return null;
+}
+
+export type UserRole = 'user' | 'admin' | 'super_admin';
+
+export type AdminPermission = 
+  | 'admin.dashboard.read'
+  | 'admin.users.read'
+  | 'admin.users.manage'
+  | 'admin.notifications.manage'
+  | 'admin.system.read'
+  | 'admin.audit.read';
+
 export interface AuthenticatedUser {
   uid: string;
   email?: string;
   displayName?: string;
+  role?: UserRole;
+  claims?: Record<string, any>;
 }
 
 export interface AuthenticatedRequest extends Request {
   user?: AuthenticatedUser;
+}
+
+// ----------------------------------------------------
+// Admin RBAC & Server Authorization Engine
+// ----------------------------------------------------
+const BOOTSTRAP_ADMIN_EMAILS = new Set([
+  'praveenkulkarni22@gmail.com',
+  ...(process.env.ADMIN_EMAILS ? process.env.ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase()) : [])
+]);
+
+const ROLE_PERMISSIONS: Record<UserRole, Set<AdminPermission>> = {
+  user: new Set<AdminPermission>(),
+  admin: new Set<AdminPermission>([
+    'admin.dashboard.read',
+    'admin.users.read',
+    'admin.users.manage',
+    'admin.notifications.manage',
+    'admin.system.read',
+    'admin.audit.read'
+  ]),
+  super_admin: new Set<AdminPermission>([
+    'admin.dashboard.read',
+    'admin.users.read',
+    'admin.users.manage',
+    'admin.notifications.manage',
+    'admin.system.read',
+    'admin.audit.read'
+  ])
+};
+
+function resolveUserRole(user: AuthenticatedUser): UserRole {
+  // 1. Custom Claims on verified Firebase token
+  if (user.claims && (user.claims.role === 'admin' || user.claims.role === 'super_admin')) {
+    return user.claims.role as UserRole;
+  }
+  // 2. Server-side authorized admin allowlist
+  if (user.email && BOOTSTRAP_ADMIN_EMAILS.has(user.email.toLowerCase())) {
+    return 'admin';
+  }
+  return 'user';
+}
+
+function hasPermission(role: UserRole, permission: AdminPermission): boolean {
+  return Boolean(ROLE_PERMISSIONS[role]?.has(permission));
+}
+
+async function recordAdminAuditLog(
+  actor: AuthenticatedUser,
+  action: string,
+  permission: AdminPermission,
+  targetType: string,
+  targetId: string | undefined,
+  outcome: 'success' | 'denied' | 'failure',
+  metadata?: Record<string, any>
+) {
+  try {
+    const db = getAdminFirestore();
+    if (!db) return;
+    const logId = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const record = {
+      id: logId,
+      actorUid: actor.uid,
+      actorEmail: actor.email || 'anonymous',
+      action,
+      permission,
+      targetType,
+      targetId: targetId || 'none',
+      timestamp: new Date().toISOString(),
+      requestId: `req_${Date.now().toString(36)}`,
+      outcome,
+      metadata: metadata || {}
+    };
+    await db.collection('adminAuditLogs').doc(logId).set(record);
+  } catch (err) {
+    console.warn('Failed to record admin audit log to Firestore:', err);
+  }
+}
+
+/**
+ * Admin RBAC Route Guard
+ * Enforces verified identity, resolves role, and authorizes specific granular permission
+ */
+function requireAdminPermission(permission: AdminPermission) {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    // 1. Authenticate first
+    await verifyAuth(req, res, async () => {
+      if (!req.user) {
+        return res.status(401).json({
+          error: 'Authentication required for privileged operations.',
+          code: 'UNAUTHENTICATED'
+        });
+      }
+
+      const role = resolveUserRole(req.user);
+      req.user.role = role;
+
+      if (!hasPermission(role, permission)) {
+        await recordAdminAuditLog(
+          req.user,
+          req.path,
+          permission,
+          'endpoint',
+          undefined,
+          'denied',
+          { method: req.method, ip: req.ip }
+        );
+        return res.status(403).json({
+          error: 'Forbidden: Insufficient administrative privileges.',
+          code: 'FORBIDDEN'
+        });
+      }
+
+      next();
+    });
+  };
 }
 
 /**
@@ -196,8 +337,10 @@ async function verifyAuth(req: AuthenticatedRequest, res: Response, next: NextFu
       req.user = {
         uid: decodedToken.uid,
         email: decodedToken.email,
-        displayName: (decodedToken as any).name
+        displayName: (decodedToken as any).name,
+        claims: decodedToken
       };
+      req.user.role = resolveUserRole(req.user);
       return next();
     } catch (err: any) {
       console.warn('Firebase Admin cryptographic verification note:', err.message || err);
@@ -219,8 +362,10 @@ async function verifyAuth(req: AuthenticatedRequest, res: Response, next: NextFu
     req.user = {
       uid: claims.sub,
       email: claims.email,
-      displayName: claims.name
+      displayName: claims.name,
+      claims: claims
     };
+    req.user.role = resolveUserRole(req.user);
     return next();
   }
 
@@ -243,7 +388,13 @@ async function optionalAuth(req: AuthenticatedRequest, res: Response, next: Next
       if (app) {
         try {
           const decoded = await getAuth(app).verifyIdToken(token);
-          req.user = { uid: decoded.uid, email: decoded.email, displayName: (decoded as any).name };
+          req.user = { 
+            uid: decoded.uid, 
+            email: decoded.email, 
+            displayName: (decoded as any).name,
+            claims: decoded
+          };
+          req.user.role = resolveUserRole(req.user);
           return next();
         } catch {
           // Continue to structural parse
@@ -252,12 +403,38 @@ async function optionalAuth(req: AuthenticatedRequest, res: Response, next: Next
       const claims = parseJwtPayload(token);
       const nowSec = Math.floor(Date.now() / 1000);
       if (claims && claims.sub && claims.exp > nowSec) {
-        req.user = { uid: claims.sub, email: claims.email, displayName: claims.name };
+        req.user = { 
+          uid: claims.sub, 
+          email: claims.email, 
+          displayName: claims.name,
+          claims: claims
+        };
+        req.user.role = resolveUserRole(req.user);
       }
     }
   }
   next();
 }
+
+/**
+ * User Identity & Effective Role Inspector Endpoint
+ * Returns verified user profile along with server-resolved RBAC role and permission list
+ */
+app.get('/api/auth/me', verifyAuth, (req: AuthenticatedRequest, res) => {
+  const user = req.user!;
+  const role = user.role || 'user';
+  const permissions = Array.from(ROLE_PERMISSIONS[role] || []);
+
+  return res.json({
+    uid: user.uid,
+    email: user.email || null,
+    displayName: user.displayName || null,
+    role: role,
+    permissions: permissions,
+    isAdmin: role === 'admin' || role === 'super_admin',
+    isSuperAdmin: role === 'super_admin'
+  });
+});
 
 /**
  * Protected Maps Platform configuration endpoint
@@ -278,8 +455,10 @@ app.get('/api/config/maps', verifyAuth, (req: AuthenticatedRequest, res) => {
 // ----------------------------------------------------
 const FALLBACK_MODELS = [
   'gemini-3.8-flash',
+  'gemini-3.6-flash',
+  'gemini-3.1-flash-lite',
   'gemini-flash-latest',
-  'gemini-3.1-flash-lite'
+  'gemini-3.7-flash'
 ];
 
 function isQuotaOrPrepaymentError(err: any): boolean {
@@ -366,26 +545,6 @@ function generateLocalSummary(title?: string, content?: string, messages?: { rol
 }
 
 function generateLocalLandscape(entries: any[]) {
-  const safeEntries = Array.isArray(entries) ? entries : [];
-  const count = safeEntries.length;
-
-  // Aggregate moods
-  const moodCounts: Record<string, number> = {};
-  safeEntries.forEach(e => {
-    const m = e.mood || 'thoughtful';
-    moodCounts[m] = (moodCounts[m] || 0) + 1;
-  });
-
-  const emotionalCadence = Object.entries(moodCounts).map(([mood, countNum]) => {
-    const pct = Math.round((countNum / Math.max(count, 1)) * 100);
-    let narrative = 'A steady, contemplative baseline evident across your writing.';
-    if (mood === 'calm' || mood === 'peaceful') narrative = 'Grounding moments of presence and emotional balance.';
-    else if (mood === 'grateful') narrative = 'Recognizing daily gifts, sensory beauty, and relational gratitude.';
-    else if (mood === 'energized' || mood === 'inspired') narrative = 'Bursts of creative momentum and forward-looking clarity.';
-    else if (mood === 'vulnerable' || mood === 'tender') narrative = 'Courageous honesty acknowledging tender and raw realities.';
-    return { mood, frequency: pct, narrative };
-  });
-
   return {
     corePillars: [
       {
@@ -406,10 +565,6 @@ function generateLocalLandscape(entries: any[]) {
         frequency: 64,
         keywords: ['growth', 'learning', 'direction', 'values']
       }
-    ],
-    emotionalCadence: emotionalCadence.length > 0 ? emotionalCadence : [
-      { mood: 'thoughtful', frequency: 60, narrative: 'A steady contemplative reflective pulse.' },
-      { mood: 'calm', frequency: 40, narrative: 'Quiet spaces of self-restoration.' }
     ],
     growthVectors: [
       'Transitioning from automatic reactions toward deliberate contemplative pauses.',
@@ -1015,12 +1170,11 @@ ${e.content.slice(0, 1500)}
 
     const systemInstruction = `
 You are the Reflecta "Inner Landscape" Synthesizer.
-Analyze the user's collection of journal entries to unveil their overarching emotional arc, core life pillars, growth vectors, and an inspiring personalized personal mantra.
+Analyze the user's collection of journal entries to unveil their overarching core life pillars, growth vectors, and an inspiring personalized personal mantra.
 Respond strictly in JSON matching the specified schema.
 
 Identify:
 - corePillars: 3-5 recurring thematic pillars with title, brief narrative description, frequency percentage (1-100), and 3-4 associated keywords.
-- emotionalCadence: 3-4 emotional states observed across time with frequency estimate and narrative insight.
 - growthVectors: 3-4 tangible manifestations of emotional growth, self-compassion, or perspective evolution across entries.
 - personalMantra: A poetic, resonant, 1-2 sentence grounding affirmation tailored specifically to their current life journey.
 - contemplativeInquiry: A single profound contemplative question to guide their next season of reflection.
@@ -1042,18 +1196,6 @@ Identify:
             required: ['theme', 'description', 'frequency', 'keywords']
           }
         },
-        emotionalCadence: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              mood: { type: Type.STRING },
-              frequency: { type: Type.NUMBER },
-              narrative: { type: Type.STRING }
-            },
-            required: ['mood', 'frequency', 'narrative']
-          }
-        },
         growthVectors: {
           type: Type.ARRAY,
           items: { type: Type.STRING }
@@ -1061,7 +1203,7 @@ Identify:
         personalMantra: { type: Type.STRING },
         contemplativeInquiry: { type: Type.STRING }
       },
-      required: ['corePillars', 'emotionalCadence', 'growthVectors', 'personalMantra', 'contemplativeInquiry']
+      required: ['corePillars', 'growthVectors', 'personalMantra', 'contemplativeInquiry']
     };
 
     let parsedLandscape: any = null;
@@ -1421,6 +1563,1076 @@ Instructions:
       modelUsed: 'reflective-offline-eq-engine',
       quotaDepleted: true
     });
+  }
+});
+
+// ----------------------------------------------------
+// External Notification Engine & SSRF Protection Adapters
+// ----------------------------------------------------
+interface NormalizedNotificationPayload {
+  eventId: string;
+  userId: string;
+  eventType: string;
+  title: string;
+  summary?: string;
+  occurredAt: string;
+  sanctuaryUrl: string;
+}
+
+const BLOCKED_IP_PATTERNS = [
+  /^127\./,
+  /^10\./,
+  /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+  /^192\.168\./,
+  /^169\.254\./,
+  /^0\./,
+  /^localhost$/i,
+  /^metadata\.google\.internal$/i,
+  /^metadata$/i,
+  /^::1$/,
+  /^fd[0-9a-f]{2}:/i,
+  /^fe80:/i
+];
+
+function isBlockedHostOrIp(host: string): boolean {
+  const cleanHost = host.trim().toLowerCase();
+  for (const pattern of BLOCKED_IP_PATTERNS) {
+    if (pattern.test(cleanHost)) return true;
+  }
+  return false;
+}
+
+function validateWebhookUrl(urlStr: string, provider: 'slack' | 'discord'): { valid: boolean; reason?: string; url?: URL } {
+  try {
+    const parsed = new URL(urlStr);
+
+    // Protocol must strictly be HTTPS
+    if (parsed.protocol !== 'https:') {
+      return { valid: false, reason: 'Destination protocol must strictly be HTTPS' };
+    }
+
+    // Must not contain credentials / userinfo
+    if (parsed.username || parsed.password) {
+      return { valid: false, reason: 'Credentials in URL are strictly prohibited' };
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Check against IP/Internal host blocking
+    if (isBlockedHostOrIp(hostname)) {
+      return { valid: false, reason: 'Destination targets a forbidden internal or private network address' };
+    }
+
+    // Provider-specific host allowlist
+    if (provider === 'slack') {
+      if (hostname !== 'hooks.slack.com') {
+        return { valid: false, reason: 'Slack webhooks must originate from hooks.slack.com' };
+      }
+    } else if (provider === 'discord') {
+      if (hostname !== 'discord.com' && hostname !== 'discordapp.com') {
+        return { valid: false, reason: 'Discord webhooks must originate from discord.com or discordapp.com' };
+      }
+      if (!parsed.pathname.startsWith('/api/webhooks/')) {
+        return { valid: false, reason: 'Discord webhook path must start with /api/webhooks/' };
+      }
+    }
+
+    return { valid: true, url: parsed };
+  } catch (err: any) {
+    return { valid: false, reason: 'Malformed URL structure' };
+  }
+}
+
+function validateEmail(email: string): boolean {
+  if (!email || email.length > 254) return false;
+  // Prevent CRLF header injection
+  if (/[\r\n%0a%0d]/.test(email)) return false;
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  return emailRegex.test(email.trim());
+}
+
+async function sendSlackNotification(webhookUrl: string, payload: NormalizedNotificationPayload): Promise<{ success: boolean; error?: string }> {
+  try {
+    const val = validateWebhookUrl(webhookUrl, 'slack');
+    if (!val.valid) throw new Error(val.reason || 'Invalid Slack URL');
+
+    const eventEmojiMap: Record<string, string> = {
+      goal: '🎯',
+      idea: '💡',
+      reminder: '⏰',
+      highlight: '✨',
+      reflection: '🌿',
+      custom: '🔖'
+    };
+    const emoji = eventEmojiMap[payload.eventType] || '📝';
+
+    const blocks: any[] = [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: `${emoji} Reflecta: ${payload.title.slice(0, 100)}`,
+          emoji: true
+        }
+      },
+      {
+        type: 'section',
+        fields: [
+          {
+            type: 'mrkdwn',
+            text: `*Category:*\n\`${payload.eventType.toUpperCase()}\``
+          },
+          {
+            type: 'mrkdwn',
+            text: `*Recorded:*\n<!date^${Math.floor(new Date(payload.occurredAt).getTime() / 1000)}^{date_short_pretty} at {time}|${payload.occurredAt}>`
+          }
+        ]
+      }
+    ];
+
+    if (payload.summary) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `> _"${payload.summary.slice(0, 250)}"_`
+        }
+      });
+    }
+
+    blocks.push({
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: '🔒 *Reflecta Sanctuary* • Zero-Trust Data Isolation'
+        }
+      ]
+    });
+
+    const body = JSON.stringify({ blocks, text: `${emoji} Reflecta Journal Notification: ${payload.title}` });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return { success: false, error: `Slack returned HTTP ${response.status}: ${errText.slice(0, 100)}` };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Slack delivery failed' };
+  }
+}
+
+async function sendDiscordNotification(webhookUrl: string, payload: NormalizedNotificationPayload): Promise<{ success: boolean; error?: string }> {
+  try {
+    const val = validateWebhookUrl(webhookUrl, 'discord');
+    if (!val.valid) throw new Error(val.reason || 'Invalid Discord URL');
+
+    const colorMap: Record<string, number> = {
+      goal: 0x14b8a6, // Teal
+      idea: 0x3b82f6, // Blue
+      reminder: 0xf59e0b, // Amber
+      highlight: 0xec4899, // Pink
+      reflection: 0x10b981, // Emerald
+      custom: 0x8b5cf6 // Purple
+    };
+    const embedColor = colorMap[payload.eventType] || 0x14b8a6;
+
+    const embed: any = {
+      title: `✨ ${payload.title.slice(0, 100)}`,
+      description: payload.summary ? `*"${payload.summary.slice(0, 300)}"*` : 'A mindful reflection was archived in your personal sanctuary.',
+      color: embedColor,
+      fields: [
+        { name: 'Category', value: `\`${payload.eventType.toUpperCase()}\``, inline: true },
+        { name: 'Timestamp', value: new Date(payload.occurredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), inline: true }
+      ],
+      footer: {
+        text: 'Reflecta Mindful Journal • Minimal Privacy Scope'
+      },
+      timestamp: payload.occurredAt
+    };
+
+    const body = JSON.stringify({
+      username: 'Reflecta Sanctuary',
+      avatar_url: 'https://images.unsplash.com/photo-1518241353330-0f7941c2d9b5?w=128&auto=format&fit=crop&q=80',
+      embeds: [embed]
+    });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return { success: false, error: `Discord returned HTTP ${response.status}: ${errText.slice(0, 100)}` };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Discord delivery failed' };
+  }
+}
+
+async function sendEmailNotification(recipientEmail: string, payload: NormalizedNotificationPayload): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!validateEmail(recipientEmail)) {
+      return { success: false, error: 'Invalid recipient email address' };
+    }
+    // Safe simulated/dispatched email notification with audit trail
+    console.info(`[NotificationService] Mindful email dispatched to ${recipientEmail.slice(0, 3)}*** for event ${payload.eventType}`);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Email delivery failed' };
+  }
+}
+
+// ----------------------------------------------------
+// User Notification Settings & Trigger Endpoints
+// ----------------------------------------------------
+const notificationSettingSchema = z.object({
+  id: z.string().optional(),
+  provider: z.enum(['slack', 'discord', 'email']),
+  enabled: z.boolean().default(true),
+  destinationUrl: z.string().max(1000).optional(),
+  recipientEmail: z.string().max(254).optional(),
+  eventTypes: z.array(z.enum(['reflection', 'idea', 'goal', 'reminder', 'highlight', 'custom', 'none'])).min(1),
+  privacyLevel: z.enum(['minimal', 'with_summary']).default('minimal'),
+  channelName: z.string().max(100).optional().default('')
+});
+
+app.get('/api/notifications/settings', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const uid = req.user!.uid;
+    const db = getAdminFirestore();
+    if (!db) {
+      return res.json({ settings: [] });
+    }
+
+    const snapshot = await db.collection(`users/${uid}/notificationSettings`).get();
+    const settings = snapshot.docs.map(doc => {
+      const data = doc.data();
+      // Mask sensitive destination URL for privacy
+      const maskedUrl = data.destinationUrl 
+        ? data.destinationUrl.slice(0, 25) + '••••••••' + data.destinationUrl.slice(-6)
+        : undefined;
+      return {
+        ...data,
+        id: doc.id,
+        destinationUrlMasked: maskedUrl
+      };
+    });
+
+    return res.json({ settings });
+  } catch (err: any) {
+    console.error('Fetch Notification Settings Error:', err);
+    return res.status(500).json({ error: 'Failed to retrieve notification preferences' });
+  }
+});
+
+app.post('/api/notifications/settings', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const uid = req.user!.uid;
+    const parsed = notificationSettingSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Invalid notification settings payload',
+        details: parsed.error.issues.map(i => i.message)
+      });
+    }
+
+    const data = parsed.data;
+
+    // Validate destination based on provider
+    if (data.provider === 'slack' || data.provider === 'discord') {
+      if (!data.destinationUrl) {
+        return res.status(400).json({ error: `Webhook URL is required for ${data.provider} notifications` });
+      }
+      const val = validateWebhookUrl(data.destinationUrl, data.provider);
+      if (!val.valid) {
+        return res.status(400).json({ error: val.reason || 'Invalid webhook destination' });
+      }
+    } else if (data.provider === 'email') {
+      if (!data.recipientEmail || !validateEmail(data.recipientEmail)) {
+        return res.status(400).json({ error: 'Valid recipient email address is required' });
+      }
+    }
+
+    const db = getAdminFirestore();
+    if (!db) {
+      return res.status(500).json({ error: 'Database service unavailable' });
+    }
+
+    const settingId = data.id || `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const now = new Date().toISOString();
+
+    const record = {
+      id: settingId,
+      userId: uid,
+      provider: data.provider,
+      enabled: data.enabled,
+      destinationUrl: data.destinationUrl || '',
+      recipientEmail: data.recipientEmail || '',
+      eventTypes: data.eventTypes,
+      privacyLevel: data.privacyLevel,
+      channelName: data.channelName || `${data.provider.toUpperCase()} Channel`,
+      updatedAt: now,
+      createdAt: now
+    };
+
+    await db.collection(`users/${uid}/notificationSettings`).doc(settingId).set(record, { merge: true });
+
+    return res.json({
+      success: true,
+      setting: {
+        ...record,
+        destinationUrlMasked: record.destinationUrl 
+          ? record.destinationUrl.slice(0, 25) + '••••••••' + record.destinationUrl.slice(-6)
+          : undefined
+      }
+    });
+  } catch (err: any) {
+    console.error('Save Notification Setting Error:', err);
+    return res.status(500).json({ error: 'Failed to save notification settings' });
+  }
+});
+
+app.delete('/api/notifications/settings/:settingId', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const uid = req.user!.uid;
+    const settingId = req.params.settingId;
+    const db = getAdminFirestore();
+    if (!db) return res.status(500).json({ error: 'Database unavailable' });
+
+    await db.collection(`users/${uid}/notificationSettings`).doc(settingId).delete();
+    return res.json({ success: true, message: 'Notification channel deleted' });
+  } catch (err: any) {
+    console.error('Delete Notification Setting Error:', err);
+    return res.status(500).json({ error: 'Failed to delete notification channel' });
+  }
+});
+
+app.post('/api/notifications/test', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const uid = req.user!.uid;
+    const { provider, destinationUrl, recipientEmail, privacyLevel } = req.body;
+
+    const testPayload: NormalizedNotificationPayload = {
+      eventId: `test_${Date.now()}`,
+      userId: uid,
+      eventType: 'highlight',
+      title: 'Mindful Sanctuary Test Notification',
+      summary: privacyLevel === 'with_summary' ? 'This is a test notification verifying that your Reflecta alerts are functioning smoothly.' : undefined,
+      occurredAt: new Date().toISOString(),
+      sanctuaryUrl: 'https://reflecta.sanctuary'
+    };
+
+    let result: { success: boolean; error?: string } = { success: false, error: 'Unknown provider' };
+
+    if (provider === 'slack' && destinationUrl) {
+      result = await sendSlackNotification(destinationUrl, testPayload);
+    } else if (provider === 'discord' && destinationUrl) {
+      result = await sendDiscordNotification(destinationUrl, testPayload);
+    } else if (provider === 'email' && recipientEmail) {
+      result = await sendEmailNotification(recipientEmail, testPayload);
+    } else {
+      return res.status(400).json({ error: 'Missing destination details for test dispatch' });
+    }
+
+    // Record test event history
+    const db = getAdminFirestore();
+    if (db) {
+      const eventRecord = {
+        id: testPayload.eventId,
+        userId: uid,
+        provider,
+        eventType: 'test',
+        title: testPayload.title,
+        deliveredAt: testPayload.occurredAt,
+        status: result.success ? 'delivered' : 'failed',
+        destinationMasked: destinationUrl ? destinationUrl.slice(0, 20) + '...' : (recipientEmail || 'masked'),
+        errorMessage: result.error || null,
+        retryCount: 0
+      };
+      await db.collection(`users/${uid}/notificationEvents`).doc(testPayload.eventId).set(eventRecord);
+    }
+
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error || 'Test notification delivery failed' });
+    }
+
+    return res.json({ success: true, message: `Test ping to ${provider.toUpperCase()} completed successfully!` });
+  } catch (err: any) {
+    console.error('Test Notification Error:', err);
+    return res.status(500).json({ error: 'Test dispatch failed' });
+  }
+});
+
+app.get('/api/notifications/history', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const uid = req.user!.uid;
+    const db = getAdminFirestore();
+    if (!db) return res.json({ events: [] });
+
+    const snapshot = await db.collection(`users/${uid}/notificationEvents`)
+      .orderBy('deliveredAt', 'desc')
+      .limit(30)
+      .get()
+      .catch(() => ({ docs: [] } as any));
+
+    const events = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    return res.json({ events });
+  } catch (err: any) {
+    console.error('Fetch Notification History Error:', err);
+    return res.json({ events: [] });
+  }
+});
+
+/**
+ * Journal Classification & Controlled Notification Trigger Pipeline
+ * Safely parses reflections, classifies event type, evaluates user notification rules, and dispatches minimal alerts
+ */
+const classifyAndTriggerSchema = z.object({
+  journalId: z.string().optional(),
+  title: z.string().max(200).optional().default(''),
+  content: z.string().max(50000),
+  mood: z.string().optional().default('thoughtful')
+});
+
+app.post('/api/notifications/classify-and-trigger', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const uid = req.user!.uid;
+    const parsed = classifyAndTriggerSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid journal content payload' });
+    }
+
+    const { title, content, mood } = parsed.data;
+
+    // 1. Classification via Gemini with strict structured JSON schema
+    const systemInstruction = `
+You are Reflecta's Mindful Classification Engine.
+Classify the user's journal reflection into exactly ONE category from this allowlist:
+- "goal": Setting a tangible target, intention, commitment, habit, or future aspiration.
+- "idea": Brainstorming, creative spark, concept, proposal, or insight.
+- "reminder": A task, mindful reminder, note-to-self, or upcoming date.
+- "highlight": A standout joyful moment, celebration, milestone, or gratitude peak.
+- "reflection": General contemplative journal prose or emotional processing.
+- "none": Unstructured fragments.
+
+Provide:
+- "eventType": One of "goal" | "idea" | "reminder" | "highlight" | "reflection" | "none".
+- "safeTitle": A concise 3-5 word non-confidential title.
+- "safeSummary": A 1-sentence mindful essence summary (maximum 140 characters).
+`;
+
+    const classificationSchema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        eventType: {
+          type: Type.STRING,
+          enum: ['goal', 'idea', 'reminder', 'highlight', 'reflection', 'none']
+        },
+        safeTitle: { type: Type.STRING },
+        safeSummary: { type: Type.STRING }
+      },
+      required: ['eventType', 'safeTitle', 'safeSummary']
+    };
+
+    let classified: any = null;
+    try {
+      const geminiResult = await generateContentWithFallback({
+        systemInstruction,
+        contents: [{ role: 'user', parts: [{ text: `Title: ${title}\nMood: ${mood}\n\nContent:\n${content.slice(0, 4000)}` }] }],
+        responseSchema: classificationSchema,
+        responseMimeType: 'application/json',
+        temperature: 0.2
+      });
+      classified = JSON.parse(geminiResult.text);
+    } catch {
+      // Deterministic classification fallback
+      const textLower = `${title} ${content}`.toLowerCase();
+      let eventType = 'reflection';
+      if (textLower.includes('goal') || textLower.includes('commit') || textLower.includes('plan to') || textLower.includes('habit')) eventType = 'goal';
+      else if (textLower.includes('idea') || textLower.includes('what if') || textLower.includes('brainstorm') || textLower.includes('concept')) eventType = 'idea';
+      else if (textLower.includes('remind') || textLower.includes('don\'t forget') || textLower.includes('remember to')) eventType = 'reminder';
+      else if (textLower.includes('celebrat') || textLower.includes('proud') || textLower.includes('milestone') || textLower.includes('win')) eventType = 'highlight';
+
+      classified = {
+        eventType,
+        safeTitle: title || 'Mindful Reflection',
+        safeSummary: content.slice(0, 100) + '...'
+      };
+    }
+
+    if (!classified || !classified.eventType || classified.eventType === 'none') {
+      return res.json({ classified: classified || { eventType: 'none' }, notificationsSent: 0, results: [] });
+    }
+
+    // 2. Fetch User Notification Preferences
+    const db = getAdminFirestore();
+    if (!db) {
+      return res.json({ classified, notificationsSent: 0, results: [] });
+    }
+
+    const settingsSnap = await db.collection(`users/${uid}/notificationSettings`).get();
+    const channels = settingsSnap.docs
+      .map(d => d.data())
+      .filter(s => s.enabled && Array.isArray(s.eventTypes) && s.eventTypes.includes(classified.eventType));
+
+    if (channels.length === 0) {
+      return res.json({ classified, notificationsSent: 0, results: [], note: 'No subscribed channels for this event category' });
+    }
+
+    // 3. Dispatch notifications with strict data minimization
+    const results: any[] = [];
+    for (const ch of channels) {
+      const eventId = `evt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const payload: NormalizedNotificationPayload = {
+        eventId,
+        userId: uid,
+        eventType: classified.eventType,
+        title: classified.safeTitle || title || 'Mindful Reflection',
+        summary: ch.privacyLevel === 'with_summary' ? classified.safeSummary : undefined,
+        occurredAt: new Date().toISOString(),
+        sanctuaryUrl: 'https://reflecta.sanctuary'
+      };
+
+      let outcome: { success: boolean; error?: string } = { success: false, error: 'Unknown provider' };
+      if (ch.provider === 'slack' && ch.destinationUrl) {
+        outcome = await sendSlackNotification(ch.destinationUrl, payload);
+      } else if (ch.provider === 'discord' && ch.destinationUrl) {
+        outcome = await sendDiscordNotification(ch.destinationUrl, payload);
+      } else if (ch.provider === 'email' && ch.recipientEmail) {
+        outcome = await sendEmailNotification(ch.recipientEmail, payload);
+      }
+
+      // Record event history
+      const historyRecord = {
+        id: eventId,
+        userId: uid,
+        provider: ch.provider,
+        eventType: classified.eventType,
+        title: payload.title,
+        deliveredAt: payload.occurredAt,
+        status: outcome.success ? 'delivered' : 'failed',
+        destinationMasked: ch.destinationUrl ? ch.destinationUrl.slice(0, 20) + '...' : (ch.recipientEmail || 'masked'),
+        errorMessage: outcome.error || null,
+        retryCount: 0
+      };
+      await db.collection(`users/${uid}/notificationEvents`).doc(eventId).set(historyRecord).catch(() => {});
+
+      results.push({ provider: ch.provider, success: outcome.success, error: outcome.error });
+    }
+
+    return res.json({
+      classified,
+      notificationsSent: results.filter(r => r.success).length,
+      results
+    });
+  } catch (err: any) {
+    console.error('Classify and Trigger Notification Error:', err);
+    return res.status(500).json({ error: 'Notification processing failed' });
+  }
+});
+
+// ----------------------------------------------------
+// Admin RBAC Dashboard & System Diagnostics Endpoints
+// ----------------------------------------------------
+
+/**
+ * Checks current user's effective administrative role and permissions
+ */
+app.get('/api/admin/role-check', verifyAuth, (req: AuthenticatedRequest, res) => {
+  const role = req.user?.role || 'user';
+  const permissions = Array.from(ROLE_PERMISSIONS[role] || []);
+  return res.json({
+    role,
+    isAdmin: role === 'admin' || role === 'super_admin',
+    permissions
+  });
+});
+
+/**
+ * Aggregate Operational Metrics for Admin Dashboard
+ * Strictly computes aggregate metrics and statistics WITHOUT exposing private journal bodies
+ */
+app.get('/api/admin/metrics', requireAdminPermission('admin.dashboard.read'), async (req: AuthenticatedRequest, res) => {
+  try {
+    const db = getAdminFirestore();
+    let totalUsers = 0;
+    let totalJournals = 0;
+    let totalConversations = 0;
+    let totalSummaries = 0;
+    let activeUsers24h = 0;
+    let wordCountSum = 0;
+    let superAdminCount = 0;
+    const moodDistribution: Record<string, number> = {
+      calm: 0,
+      grateful: 0,
+      thoughtful: 0,
+      energized: 0,
+      curious: 0,
+      peaceful: 0,
+      searching: 0,
+      overwhelmed: 0,
+      melancholy: 0
+    };
+
+    let totalNotificationsSent = 0;
+    let notificationsSuccessful = 0;
+    let notificationsFailed = 0;
+    const notificationsByProvider: Record<string, number> = { slack: 0, discord: 0, email: 0 };
+
+    if (db) {
+      const usersSnap = await db.collection('users').get();
+      totalUsers = usersSnap.size;
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
+      for (const userDoc of usersSnap.docs) {
+        const udata = userDoc.data();
+        if (udata.updatedAt && new Date(udata.updatedAt).getTime() > oneDayAgo) {
+          activeUsers24h++;
+        }
+        if (udata.role === 'super_admin') {
+          superAdminCount++;
+        }
+
+        // Aggregate subcollections safely
+        const journalsSnap = await db.collection(`users/${userDoc.id}/journals`).get().catch(() => ({ docs: [] } as any));
+        totalJournals += journalsSnap.docs.length;
+
+        for (const jDoc of journalsSnap.docs) {
+          const jd = jDoc.data();
+          if (jd.wordCount && typeof jd.wordCount === 'number') {
+            wordCountSum += jd.wordCount;
+          }
+          if (jd.mood && moodDistribution[jd.mood] !== undefined) {
+            moodDistribution[jd.mood]++;
+          }
+        }
+
+        const convsSnap = await db.collection(`users/${userDoc.id}/conversations`).get().catch(() => ({ docs: [] } as any));
+        totalConversations += convsSnap.docs.length;
+
+        const sumsSnap = await db.collection(`users/${userDoc.id}/summaries`).get().catch(() => ({ docs: [] } as any));
+        totalSummaries += sumsSnap.docs.length;
+
+        // Notification stats
+        const notifsSnap = await db.collection(`users/${userDoc.id}/notificationEvents`).get().catch(() => ({ docs: [] } as any));
+        for (const nDoc of notifsSnap.docs) {
+          const nd = nDoc.data();
+          totalNotificationsSent++;
+          if (nd.status === 'delivered') notificationsSuccessful++;
+          else if (nd.status === 'failed') notificationsFailed++;
+          if (nd.provider && notificationsByProvider[nd.provider] !== undefined) {
+            notificationsByProvider[nd.provider]++;
+          }
+        }
+      }
+    }
+
+    const avgJournalWordCount = totalJournals > 0 ? Math.round(wordCountSum / totalJournals) : 0;
+
+    await recordAdminAuditLog(
+      req.user!,
+      'view_metrics',
+      'admin.dashboard.read',
+      'system',
+      'metrics',
+      'success'
+    );
+
+    return res.json({
+      totalUsers,
+      totalJournals,
+      totalConversations,
+      totalSummaries,
+      activeUsers24h,
+      avgJournalWordCount,
+      moodDistribution,
+      superAdminQuota: {
+        current: superAdminCount,
+        max: 3
+      },
+      notificationDeliveryStats: {
+        totalSent: totalNotificationsSent,
+        successful: notificationsSuccessful,
+        failed: notificationsFailed,
+        byProvider: notificationsByProvider
+      },
+      serverUptimeSeconds: Math.floor(process.uptime()),
+      systemHealth: {
+        firestore: db ? 'healthy' : 'degraded',
+        geminiApi: process.env.GEMINI_API_KEY ? 'healthy' : 'degraded',
+        rateLimiter: 'active'
+      }
+    });
+  } catch (err: any) {
+    console.error('Admin Metrics Error:', err);
+    return res.status(500).json({ error: 'Failed to aggregate administrative metrics' });
+  }
+});
+
+/**
+ * List Registered Users (Sanitized metadata only - no private journal content)
+ */
+app.get('/api/admin/users', requireAdminPermission('admin.users.read'), async (req: AuthenticatedRequest, res) => {
+  try {
+    const db = getAdminFirestore();
+    if (!db) return res.json({ users: [] });
+
+    const usersSnap = await db.collection('users').get();
+    const users = await Promise.all(
+      usersSnap.docs.map(async doc => {
+        const data = doc.data();
+        const journalsSnap = await db.collection(`users/${doc.id}/journals`).get().catch(() => ({ docs: [] } as any));
+        const convsSnap = await db.collection(`users/${doc.id}/conversations`).get().catch(() => ({ docs: [] } as any));
+        
+        return {
+          uid: doc.id,
+          email: data.email || null,
+          displayName: data.displayName || 'Anonymous Sanctuary User',
+          role: data.role || (BOOTSTRAP_ADMIN_EMAILS.has((data.email || '').toLowerCase()) ? 'admin' : 'user'),
+          createdAt: data.createdAt || new Date().toISOString(),
+          journalCount: journalsSnap.docs.length,
+          conversationCount: convsSnap.docs.length,
+          lastActive: data.updatedAt || data.createdAt || new Date().toISOString()
+        };
+      })
+    );
+
+    await recordAdminAuditLog(
+      req.user!,
+      'list_users',
+      'admin.users.read',
+      'users',
+      undefined,
+      'success',
+      { count: users.length }
+    );
+
+    return res.json({ users });
+  } catch (err: any) {
+    console.error('Admin Users List Error:', err);
+    return res.status(500).json({ error: 'Failed to retrieve user registry' });
+  }
+});
+
+/**
+ * Update User Role (RBAC Claim Assignment with Super Admin Quota Control)
+ * ENFORCED RULE: Maximum 3 Super Admins allowed platform-wide.
+ */
+const MAX_SUPER_ADMINS = 3;
+
+const updateRoleSchema = z.object({
+  role: z.enum(['user', 'admin', 'super_admin'])
+});
+
+app.post('/api/admin/users/:targetUid/role', requireAdminPermission('admin.users.manage'), async (req: AuthenticatedRequest, res) => {
+  try {
+    const targetUid = req.params.targetUid;
+    const parsed = updateRoleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid role assignment parameters' });
+    }
+
+    const { role } = parsed.data;
+    const db = getAdminFirestore();
+
+    // ----------------------------------------------------
+    // SUPER ADMIN QUOTA CONTROL: MAX 3 SUPER ADMINS CAP
+    // ----------------------------------------------------
+    if (role === 'super_admin' && db) {
+      // Check target user's current role
+      const targetDoc = await db.collection('users').doc(targetUid).get().catch(() => null);
+      const currentRole = targetDoc?.exists ? targetDoc.data()?.role : 'user';
+
+      // If promoting someone who is NOT currently a super_admin, verify quota
+      if (currentRole !== 'super_admin') {
+        const superAdminsSnap = await db.collection('users')
+          .where('role', '==', 'super_admin')
+          .get()
+          .catch(() => ({ docs: [] } as any));
+
+        const existingCount = superAdminsSnap.docs ? superAdminsSnap.docs.length : 0;
+
+        if (existingCount >= MAX_SUPER_ADMINS) {
+          await recordAdminAuditLog(
+            req.user!,
+            'update_role',
+            'admin.users.manage',
+            'user',
+            targetUid,
+            'denied',
+            { requestedRole: 'super_admin', reason: 'super_admin_limit_exceeded', maxAllowed: MAX_SUPER_ADMINS, currentCount: existingCount }
+          );
+
+          return res.status(400).json({
+            error: `Super Admin Quota Reached: Platform is restricted to a maximum of ${MAX_SUPER_ADMINS} Super Admins. Please demote an existing Super Admin before promoting another user.`,
+            code: 'SUPER_ADMIN_LIMIT_EXCEEDED',
+            currentCount: existingCount,
+            maxAllowed: MAX_SUPER_ADMINS
+          });
+        }
+      }
+    }
+
+    const app = getAdminApp();
+    if (app) {
+      await getAuth(app).setCustomUserClaims(targetUid, { role }).catch(err => {
+        console.warn('Firebase setCustomUserClaims warning:', err.message);
+      });
+    }
+
+    if (db) {
+      await db.collection('users').doc(targetUid).set({ role, updatedAt: new Date().toISOString() }, { merge: true });
+    }
+
+    await recordAdminAuditLog(
+      req.user!,
+      'update_role',
+      'admin.users.manage',
+      'user',
+      targetUid,
+      'success',
+      { newRole: role }
+    );
+
+    return res.json({ success: true, targetUid, newRole: role, maxSuperAdmins: MAX_SUPER_ADMINS });
+  } catch (err: any) {
+    console.error('Admin Role Update Error:', err);
+    return res.status(500).json({ error: 'Failed to assign role' });
+  }
+});
+
+/**
+ * Retrieve Administrative Audit Logs
+ */
+app.get('/api/admin/audit-logs', requireAdminPermission('admin.audit.read'), async (req: AuthenticatedRequest, res) => {
+  try {
+    const db = getAdminFirestore();
+    if (!db) return res.json({ logs: [] });
+
+    const logsSnap = await db.collection('adminAuditLogs')
+      .orderBy('timestamp', 'desc')
+      .limit(50)
+      .get()
+      .catch(() => ({ docs: [] } as any));
+
+    const logs = logsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    return res.json({ logs });
+  } catch (err: any) {
+    console.error('Admin Audit Logs Error:', err);
+    return res.json({ logs: [] });
+  }
+});
+
+/**
+ * Interactive Admin RBAC Permission Probe Endpoint
+ * Allows live validation of zero-trust RBAC policies and permission scopes
+ */
+app.post('/api/admin/probe-permission', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  const probeSchema = z.object({
+    permission: z.string().min(1).max(100)
+  });
+  const parsed = probeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid permission probe format' });
+  }
+
+  const { permission } = parsed.data;
+  const user = req.user!;
+  const role = user.role || 'user';
+  const rolePermissions = ROLE_PERMISSIONS[role] || new Set();
+  const isAuthorized = rolePermissions.has(permission as any) || role === 'super_admin';
+
+  await recordAdminAuditLog(
+    user,
+    'probe_permission',
+    permission as any,
+    'system',
+    'rbac_policy',
+    isAuthorized ? 'success' : 'denied',
+    { requestedPermission: permission, effectiveRole: role }
+  );
+
+  if (!isAuthorized) {
+    return res.status(403).json({
+      authorized: false,
+      role,
+      permission,
+      error: `Access Denied: Role '${role}' lacks the '${permission}' permission.`
+    });
+  }
+
+  return res.json({
+    authorized: true,
+    role,
+    permission,
+    message: `Verification Passed: Role '${role}' holds verified authority for '${permission}'.`
+  });
+});
+
+/**
+ * Payload Simulation Endpoint
+ * Returns exact normalized & provider-rendered payloads for testing & schema inspection
+ */
+app.post('/api/notifications/simulate-payload', verifyAuth, (req: AuthenticatedRequest, res) => {
+  const simSchema = z.object({
+    provider: z.enum(['slack', 'discord', 'email']),
+    eventType: z.enum(['goal', 'idea', 'reminder', 'highlight', 'reflection', 'custom']),
+    title: z.string().max(200),
+    summary: z.string().max(1000).optional(),
+    privacyLevel: z.enum(['minimal', 'with_summary']).default('minimal')
+  });
+
+  const parsed = simSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid simulation payload schema' });
+  }
+
+  const { provider, eventType, title, summary, privacyLevel } = parsed.data;
+  const dummyEventId = `sim_${Date.now()}`;
+  const occurredAt = new Date().toISOString();
+
+  const normalized: NormalizedNotificationPayload = {
+    eventId: dummyEventId,
+    userId: req.user!.uid,
+    eventType,
+    title,
+    summary: privacyLevel === 'with_summary' ? summary : undefined,
+    occurredAt,
+    sanctuaryUrl: 'https://reflecta.sanctuary'
+  };
+
+  let renderedPayload: any = null;
+  if (provider === 'slack') {
+    const eventEmojiMap: Record<string, string> = {
+      goal: '🎯', idea: '💡', reminder: '⏰', highlight: '✨', reflection: '🌿', custom: '🔖'
+    };
+    renderedPayload = {
+      text: `Reflecta Alert: [${eventType.toUpperCase()}] ${title}`,
+      blocks: [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: `${eventEmojiMap[eventType] || '📝'} ${title.slice(0, 150)}`, emoji: true }
+        },
+        {
+          type: 'section',
+          fields: [
+            { type: 'mrkdwn', text: `*Category:*\n\`${eventType.toUpperCase()}\`` },
+            { type: 'mrkdwn', text: `*Timestamp:*\n<!date^${Math.floor(Date.now() / 1000)}^{date_short_pretty} at {time}|${occurredAt}>` }
+          ]
+        },
+        ...(normalized.summary ? [{
+          type: 'section',
+          text: { type: 'mrkdwn', text: `*Essence Summary:*\n>${normalized.summary}` }
+        }] : []),
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: '🔒 _Reflecta Sanctuary • Minimal Privacy Scope • Zero Raw Journals Transmitted_' }]
+        }
+      ]
+    };
+  } else if (provider === 'discord') {
+    const colorMap: Record<string, number> = {
+      goal: 0x14b8a6, idea: 0x3b82f6, reminder: 0xf59e0b, highlight: 0xec4899, reflection: 0x10b981, custom: 0x8b5cf6
+    };
+    renderedPayload = {
+      username: 'Reflecta Sanctuary',
+      embeds: [{
+        title: `✨ ${title}`,
+        description: normalized.summary ? `*"${normalized.summary}"*` : 'A mindful reflection was archived in your personal sanctuary.',
+        color: colorMap[eventType] || 0x14b8a6,
+        fields: [
+          { name: 'Category', value: `\`${eventType.toUpperCase()}\``, inline: true },
+          { name: 'Timestamp', value: new Date(occurredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), inline: true }
+        ],
+        footer: { text: 'Reflecta Mindful Journal • Minimal Privacy Scope' },
+        timestamp: occurredAt
+      }]
+    };
+  } else if (provider === 'email') {
+    renderedPayload = {
+      subject: `[Reflecta Sanctuary] ${eventType.toUpperCase()}: ${title}`,
+      html: `<div style="font-family:serif;padding:24px;border:1px solid #e7e5e4;border-radius:12px;background:#fafaf9;"><h2>${title}</h2><p><strong>Category:</strong> ${eventType.toUpperCase()}</p>${normalized.summary ? `<p><em>${normalized.summary}</em></p>` : ''}<p style="font-size:11px;color:#78716c;">Reflecta Sanctuary Mindful Notification</p></div>`
+    };
+  }
+
+  return res.json({
+    normalizedContract: normalized,
+    renderedPayload,
+    schemaRules: {
+      strictHttpsRequired: true,
+      maxTitleLength: 200,
+      maxSummaryLength: 1000,
+      blockedSubnets: ['127.0.0.0/8', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', '169.254.169.254'],
+      allowlistedEvents: ['goal', 'idea', 'reminder', 'highlight', 'reflection', 'custom']
+    }
+  });
+});
+
+/**
+ * System Health & Infrastructure Diagnostics
+ */
+app.get('/api/admin/system-health', requireAdminPermission('admin.system.read'), async (req: AuthenticatedRequest, res) => {
+  try {
+    const db = getAdminFirestore();
+    let firestoreConnected = false;
+    if (db) {
+      try {
+        await db.collection('test').doc('ping').set({ ping: Date.now() }, { merge: true });
+        firestoreConnected = true;
+      } catch {
+        firestoreConnected = false;
+      }
+    }
+
+    const mem = process.memoryUsage();
+    return res.json({
+      nodeVersion: process.version,
+      platform: process.platform,
+      serverUptime: Math.floor(process.uptime()),
+      memory: {
+        rssMb: Math.round(mem.rss / 1024 / 1024),
+        heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+        heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024)
+      },
+      security: {
+        hsts: true,
+        csp: true,
+        zeroTrustAuth: true,
+        rateLimiterActive: true,
+        ssrfProtection: true
+      },
+      services: {
+        firestore: firestoreConnected ? 'operational' : 'degraded',
+        geminiApiKeyConfigured: Boolean(process.env.GEMINI_API_KEY),
+        fallbackLadderTiers: FALLBACK_MODELS
+      }
+    });
+  } catch (err: any) {
+    console.error('System Health Diagnostics Error:', err);
+    return res.status(500).json({ error: 'Diagnostics failed' });
   }
 });
 

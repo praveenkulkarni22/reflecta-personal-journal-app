@@ -17,6 +17,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Lightweight connection check probe endpoint
+    match /test/{docId} {
+      allow read: if true;
+    }
+
     // Isolated user-owned root namespace
     match /users/{userId} {
       // User profile doc: only owner can read, create, or update; deletion disallowed
@@ -71,6 +76,28 @@ service cloud.firestore {
           && (request.resource.data.userId == null || request.resource.data.userId == userId);
         allow delete: if isOwner(userId);
       }
+
+      // External Notification Settings (Owner-bound)
+      match /notificationSettings/{settingId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && (request.resource.data.userId == null || request.resource.data.userId == userId);
+        allow delete: if isOwner(userId);
+      }
+
+      // External Notification History Logs (Owner-bound)
+      match /notificationEvents/{eventId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && (request.resource.data.userId == null || request.resource.data.userId == userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // Administrative Audit Logs: Client write is strictly forbidden. Read is restricted.
+    match /adminAuditLogs/{auditId} {
+      allow read: if isAuthenticated() && request.auth.token.role in ['admin', 'super_admin'];
+      allow write: if false; // Only server Admin SDK can record audit logs
     }
   }
 }

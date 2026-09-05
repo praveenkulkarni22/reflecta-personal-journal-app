@@ -8,6 +8,7 @@ export interface UserProfile {
   displayName: string | null;
   photoURL: string | null;
   createdAt: string;
+  role?: UserRole;
 }
 
 export type ReflectionMood = 
@@ -110,19 +111,12 @@ export interface MindspaceTheme {
   keywords: string[];
 }
 
-export interface EmotionalCadence {
-  mood: string;
-  frequency: number;
-  narrative: string;
-}
-
 export interface InnerLandscapeSynthesis {
   id: string;
   userId: string;
   generatedAt: string;
   entryCountAnalyzed: number;
   corePillars: MindspaceTheme[];
-  emotionalCadence: EmotionalCadence[];
   growthVectors: string[];
   personalMantra: string;
   contemplativeInquiry: string;
@@ -172,5 +166,107 @@ export interface CalendarEvent {
   recurrence?: EventRecurrence;
   createdAt: string;
   updatedAt: string;
+}
+
+// ----------------------------------------------------
+// Admin RBAC & System Types
+// ----------------------------------------------------
+export type UserRole = 'user' | 'admin' | 'super_admin';
+
+export type AdminPermission = 
+  | 'admin.dashboard.read'
+  | 'admin.users.read'
+  | 'admin.users.manage'
+  | 'admin.notifications.manage'
+  | 'admin.system.read'
+  | 'admin.audit.read';
+
+export interface AdminAuditLog {
+  id: string;
+  actorUid: string;
+  actorEmail?: string;
+  action: string;
+  permission: AdminPermission;
+  targetType: string;
+  targetId?: string;
+  timestamp: string;
+  requestId: string;
+  outcome: 'success' | 'denied' | 'failure';
+  metadata?: Record<string, any>;
+}
+
+export interface AdminMetrics {
+  totalUsers: number;
+  totalJournals: number;
+  totalConversations: number;
+  totalSummaries: number;
+  activeUsers24h: number;
+  avgJournalWordCount: number;
+  moodDistribution: Record<string, number>;
+  notificationDeliveryStats: {
+    totalSent: number;
+    successful: number;
+    failed: number;
+    byProvider: Record<string, number>;
+  };
+  serverUptimeSeconds: number;
+  systemHealth: {
+    firestore: 'healthy' | 'degraded' | 'error';
+    geminiApi: 'healthy' | 'degraded' | 'error';
+    rateLimiter: 'active';
+  };
+}
+
+export interface AdminUserInfo {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  role: UserRole;
+  createdAt: string;
+  journalCount: number;
+  conversationCount: number;
+  lastActive: string;
+}
+
+// ----------------------------------------------------
+// External Notification Types
+// ----------------------------------------------------
+export type NotificationProvider = 'slack' | 'discord' | 'email';
+
+export type NotificationEventType = 
+  | 'reflection'
+  | 'idea'
+  | 'goal'
+  | 'reminder'
+  | 'highlight'
+  | 'custom'
+  | 'none';
+
+export interface NotificationSetting {
+  id: string;
+  userId: string;
+  provider: NotificationProvider;
+  enabled: boolean;
+  destinationUrl?: string; // Webhook URL (masked in UI for privacy)
+  recipientEmail?: string; // For email notifications
+  eventTypes: NotificationEventType[]; // Triggers (e.g. ['goal', 'idea', 'reminder', 'highlight'])
+  privacyLevel: 'minimal' | 'with_summary'; // 'minimal' = safe title + type + link; 'with_summary' = includes 1-sentence safe AI summary
+  channelName?: string; // Optional user label (e.g. "#mindful-journal" or "Daily Goals Discord")
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationEventRecord {
+  id: string;
+  userId: string;
+  provider: NotificationProvider;
+  eventType: NotificationEventType;
+  title: string;
+  summary?: string;
+  deliveredAt: string;
+  status: 'delivered' | 'failed' | 'skipped';
+  destinationMasked: string;
+  errorMessage?: string;
+  retryCount: number;
 }
 

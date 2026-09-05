@@ -1,4 +1,4 @@
-# Reflecta — Personal Gemini Journal
+# Reflecta — Personal Gemini Journal & Zero-Trust Sanctuary
 
 > **A place for every thought. A moment for yourself.**
 
@@ -10,16 +10,35 @@ Reflecta is a production-grade, privacy-first personal sanctuary where individua
 
 Reflecta is built on a **defense-in-depth, zero-leakage security model**:
 
-- **Client Layer**: React 18 + TypeScript + Tailwind CSS with responsive typography, dark luxury styling, interactive volume reader, and Web Audio API-synthesized ambient noise generators.
-- **Server API Gateway**: Express (Node.js) server running on Cloud Run, proxying all Gemini 3.6 Flash calls server-side. Operational secrets (Gemini API keys) are **never exposed to the browser**.
-- **Gemini Resilience Ladder**: Automated fallback ladder (`gemini-3.8-flash` → `gemini-flash-latest` → `gemini-3.1-flash-lite`) with zero-downtime offline reflective synthesis fallback.
-- **Authentication**: Firebase Authentication with Google Sign-In and token verification.
+- **Client Layer**: React 18 + TypeScript + Tailwind CSS with dark luxury styling, ambient audio noise generators, interactive volume reader, and responsive journaling layouts.
+- **Server API Gateway**: Express (Node.js) server running on Cloud Run, proxying all Gemini API calls server-side. Operational secrets (Gemini API keys) are **never exposed to the browser**.
+- **Gemini Multi-Model Fallback Ladder**: Automated fallback ladder (`gemini-3.6-flash` → `gemini-3.1-flash-lite` → `gemini-flash-latest` → `gemini-3.7-flash`) ensuring high availability and zero-downtime offline reflective synthesis.
+- **Authentication & Identity**: Firebase Authentication with Google Sign-In and cryptographic ID token verification on every API request.
 - **Data Isolation**: Cloud Firestore with owner-bound, path-isolated security rules (`/users/{userId}/...`).
+- **Server-Enforced RBAC Engine**: Zero-Trust Role-Based Access Control enforcing `User`, `Admin`, and `Super Admin` role boundaries server-side with Custom Claims verification.
+- **Super Admin Hard Quota Cap**: Strictly enforced ceiling of **at most 3 Super Admins** platform-wide to prevent privilege sprawl and unauthorized escalation.
+- **External Webhook Engine**: Server-side webhook dispatcher for Slack, Discord, and Email alerts with SSRF shielding, destination validation, rate limiting, and minimal privacy scope.
 - **Original Enhancement**: **The Inner Landscape Synthesizer** — a longitudinal synthesis engine analyzing recurring life pillars, emotional cadence vectors, personal grounding mantras, and seasonal contemplative inquiries.
 
 ---
 
-## 2. Threat Summary & Security Verification
+## 2. Server-Enforced Zero-Trust RBAC System
+
+### Role Classification & Privilege Scope Matrix
+
+| Role | Scope & Data Boundary | Core Capabilities | Administrative Permissions |
+| :--- | :--- | :--- | :--- |
+| **`User`** *(Standard)* | Bound strictly to `users/{userId}/*` in Firestore. | Personal journaling, Socratic dialogue, memory calendar, inner landscape, personal webhook alerts. | **None (`0`)**. Barred from administrative APIs, user registry, and telemetry. |
+| **`Admin`** *(Elevated)* | Read-only aggregate metrics, user registry, audit logs, health telemetry. | Inspecting operational metrics, managing user roles, auditing security logs, configuring external webhooks, running permission probes. | Full `admin.*` permission set (`admin.dashboard.read`, `admin.users.read`, `admin.users.manage`, `admin.notifications.manage`, `admin.system.read`, `admin.audit.read`). |
+| **`Super Admin`** *(Master)* | Unrestricted platform-wide system & security authority. | Promoting/demoting admin roles, master security policy overrides, infrastructure policy management, full audit control. | All `admin.*` permissions + `super_admin.override`. **Restricted to max 3 Super Admins platform-wide.** |
+
+### Super Admin Quota Control (Maximum 3 Super Admins)
+- **Quota Enforcer**: During role assignment (`POST /api/admin/users/:targetUid/role`), the server queries Firestore for existing `super_admin` accounts. If the count is already 3, any attempt to promote another account to `super_admin` is rejected with `400 Bad Request` and logged as a denied security audit event.
+- **Demotion Requirement**: To assign a new Super Admin when quota is full (3/3), an existing Super Admin must first be demoted to `Admin` or `User`.
+
+---
+
+## 3. Threat Summary & Security Verification
 
 | Threat Zone | Threat | Impact | Countermeasure Implemented |
 |---|---|---|---|
@@ -28,10 +47,13 @@ Reflecta is built on a **defense-in-depth, zero-leakage security model**:
 | **Tool Execution** | Dynamic code execution, privilege escalation | Unauthorized operations | Absolute ban on `eval()`, `new Function()`, or dynamic runtime execution. |
 | **Memory & State** | Cross-user data leakage, hijacked conversation IDs | Unauthorized data access | Strict Firestore path isolation (`users/{userId}/...`) and owner-only Security Rules (`request.auth.uid == userId`). |
 | **Inter-System Comms** | API key leakage, token forgery | Credential compromise | Gemini API keys stored in Secret Manager; Firebase ID token verification server-side. |
+| **Role Escalation** | Client spoofing `isAdmin` or bypassing RBAC | Unauthorized administrative access | Server-side Firebase token verification and custom claims evaluation; client state ignored for authorization. |
+| **Quota Bypass** | Unbounded promotion of Super Admins | Privilege sprawl | Server-enforced Super Admin cap (max 3) checked in atomic transactional role assignment handler. |
+| **Webhook SSRF** | Attacker submitting internal/loopback webhook URLs | SSRF, internal network scan | Webhook destination URL validation blocking localhost, 127.0.0.1, internal IP ranges, and metadata services. |
 
 ---
 
-## 3. Prerequisites
+## 4. Prerequisites
 
 - [Node.js](https://nodejs.org/) v18+ and `npm`
 - [Google Cloud SDK (`gcloud`)](https://cloud.google.com/sdk)
@@ -40,9 +62,9 @@ Reflecta is built on a **defense-in-depth, zero-leakage security model**:
 
 ---
 
-## 4. Google Cloud APIs Setup
+## 5. Google Cloud APIs Setup
 
-Enable the required services in your GCP project:
+Enable required GCP services:
 
 ```bash
 gcloud services enable \
@@ -55,9 +77,9 @@ gcloud services enable \
 
 ---
 
-## 5. Google Cloud Secret Manager Configuration
+## 6. Google Cloud Secret Manager Configuration
 
-Store your Gemini API Key securely in Secret Manager:
+Store Gemini API credentials securely in Secret Manager:
 
 ```bash
 # 1. Create the Secret in Secret Manager
@@ -79,9 +101,9 @@ gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
 
 ---
 
-## 6. Cloud Firestore Security Rules
+## 7. Cloud Firestore Security Rules
 
-Deploy the path-isolated security rules to ensure zero cross-user leakage:
+Deploy path-isolated security rules to enforce zero cross-user leakage:
 
 ```javascript
 rules_version = '2';
@@ -129,6 +151,18 @@ service cloud.firestore {
           if request.auth != null &&
              request.auth.uid == userId;
       }
+
+      match /notificationSettings/{settingId} {
+        allow read, write:
+          if request.auth != null &&
+             request.auth.uid == userId;
+      }
+
+      match /notificationEvents/{eventId} {
+        allow read, write:
+          if request.auth != null &&
+             request.auth.uid == userId;
+      }
     }
   }
 }
@@ -136,15 +170,33 @@ service cloud.firestore {
 
 ---
 
-## 7. Firebase Authentication Setup
+## 8. Firebase Authentication Setup
 
 1. In the [Firebase Console](https://console.firebase.google.com/), enable **Google Sign-In** under **Authentication > Sign-in method**.
-2. Add your authorized domains (e.g. `localhost`, and your Cloud Run deployment domain).
-3. Populate client config in your environment.
+2. Add your authorized domains (`localhost` and Cloud Run deployment domain).
+3. Client configuration is automatically read from `firebase-applet-config.json` / environment variables.
 
 ---
 
-## 8. Local Development
+## 9. API Reference
+
+### Public / Authenticated User Endpoints
+- `GET /api/auth/me`: Validates user ID token and returns effective RBAC role (`user`, `admin`, `super_admin`) and permissions.
+- `POST /api/chat`: Server-side Gemini multi-turn conversation endpoint with fallback model support.
+- `POST /api/journals/summarize`: Generates AI reflection summary and fires external webhooks if configured.
+- `POST /api/notifications/test`: Dispatches a test notification to Slack, Discord, or Email with SSRF shielding.
+
+### Administrative Endpoints (`admin.*` required)
+- `GET /api/admin/metrics`: Aggregates system metrics, user counts, notification delivery stats, and **Super Admin Quota Status (current / 3 max)**.
+- `GET /api/admin/users`: Lists registered accounts with sanitized metadata (zero reflection text).
+- `POST /api/admin/users/:targetUid/role`: Assigns user role (`user`, `admin`, `super_admin`). Enforces **Maximum 3 Super Admins** hard cap.
+- `GET /api/admin/audit-logs`: Retrieves latest administrative security audit logs.
+- `POST /api/admin/probe-permission`: Interactive live permission probe tool to test zero-trust policy evaluations.
+- `GET /api/admin/system-health`: Returns real-time health telemetry for Firestore, Gemini API, and Rate Limiting.
+
+---
+
+## 10. Local Development
 
 1. Install dependencies:
    ```bash
@@ -156,14 +208,14 @@ service cloud.firestore {
    GEMINI_API_KEY="your-gemini-api-key"
    ```
 
-3. Run the development server:
+3. Run development server:
    ```bash
    npm run dev
    ```
 
 ---
 
-## 9. Cloud Run Deployment
+## 11. Cloud Run Deployment
 
 Deploy directly to Google Cloud Run with secret binding:
 
@@ -189,6 +241,6 @@ gcloud run services update reflecta \
 
 ---
 
-## 10. License & Privacy
+## 12. License & Privacy
 
-Built with privacy-first standards. All reflections and conversations remain isolated to the user's private encrypted vault.
+Built with zero-trust privacy standards. All reflections and conversations remain isolated to the user's private encrypted vault.

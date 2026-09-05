@@ -26,12 +26,12 @@ import {
   ArrowRight,
   Filter,
   Check,
-  Repeat,
-  TrendingUp
+  Repeat
 } from 'lucide-react';
 import { JournalEntry, CalendarEvent, CalendarEventCategory, EventRecurrence } from '../types';
 import { useTheme } from '../context/ThemeContext';
-import { EmotionalTrendsChart } from './EmotionalTrendsChart';
+import { MemoryStoriesBar } from './MemoryStoriesBar';
+import { MemoryStoriesViewer, MemoryCategory } from './MemoryStoriesViewer';
 
 interface CalendarViewProps {
   entries: JournalEntry[];
@@ -92,7 +92,7 @@ const EVENT_PRESETS: EventPreset[] = [
   },
   {
     category: 'sports',
-    label: "Sports Meet",
+    label: "Sports",
     sublabel: "Tournament, match or run",
     icon: Trophy,
     defaultTitle: "Sports Meet & Practice",
@@ -236,10 +236,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeDetailTab, setActiveDetailTab] = useState<'reflections' | 'milestones'>('reflections');
 
+  // Google Photos style Memory Stories Viewer state
+  const [isStoriesViewerOpen, setIsStoriesViewerOpen] = useState(false);
+  const [selectedStoryCategory, setSelectedStoryCategory] = useState<MemoryCategory>('weekly');
+
   // Filter state for upcoming events
   const [eventFilter, setEventFilter] = useState<'all' | CalendarEventCategory>('all');
   const [eventRecurrence, setEventRecurrence] = useState<EventRecurrence>('none');
-  const [isEmotionalTrendsOpen, setIsEmotionalTrendsOpen] = useState(false);
 
   // Map entries by date key (YYYY-MM-DD)
   const entriesByDate = useMemo(() => {
@@ -519,27 +522,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   type="button"
-                  onClick={() => setIsEmotionalTrendsOpen(!isEmotionalTrendsOpen)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
-                    isEmotionalTrendsOpen
-                      ? isDark
-                        ? 'bg-[#67C3DE]/20 text-[#67C3DE] border-[#67C3DE]/60'
-                        : 'bg-[#67C3DE]/20 text-[#083847] border-[#67C3DE]/70'
-                      : isDark
-                        ? 'bg-neutral-900 hover:bg-neutral-800 text-neutral-200 border-neutral-700'
-                        : 'bg-white hover:bg-stone-100 text-neutral-700 border-stone-300 shadow-2xs'
-                  }`}
-                  title="Toggle D3 Emotional Trends Line Chart"
-                >
-                  <TrendingUp className="w-3.5 h-3.5 text-[#67C3DE]" />
-                  <span className="hidden sm:inline">Emotional Trends (D3)</span>
-                  <span className="sm:hidden">Trends (D3)</span>
-                </motion.button>
-
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  type="button"
                   onClick={() => onAddEntryForDate(selectedDateStr)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap"
                 >
@@ -549,15 +531,24 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </div>
             </div>
 
-            {/* QUICK PRESETS STRIP (Compact horizontal strip - shrink-0) */}
-            <div className="relative z-10 flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-black/[0.05] dark:border-white/[0.05] shrink-0">
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 w-full pr-8 sm:pr-12">
-                <span className={`text-[10px] font-mono uppercase tracking-wider font-semibold whitespace-nowrap flex items-center gap-1 mr-0.5 shrink-0 ${
-                  isDark ? 'text-teal-400' : 'text-teal-700'
-                }`}>
-                  <Sparkles className="w-3 h-3 text-teal-500 shrink-0" />
-                  Quick Presets:
-                </span>
+            {/* GOOGLE PHOTOS STYLE MEMORY GLIMPSES CAROUSEL STRIP */}
+            <MemoryStoriesBar
+              entries={entries}
+              onOpenStory={(cat) => {
+                setSelectedStoryCategory(cat);
+                setIsStoriesViewerOpen(true);
+              }}
+            />
+
+            {/* QUICK PRESETS STRIP (Aligned within frame without horizontal scrolling) */}
+            <div className="relative z-10 flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2 pb-2 border-b border-black/[0.05] dark:border-white/[0.05] shrink-0">
+              <span className={`text-[10px] font-mono uppercase tracking-wider font-semibold whitespace-nowrap flex items-center gap-1 mr-1 shrink-0 ${
+                isDark ? 'text-teal-400' : 'text-teal-700'
+              }`}>
+                <Sparkles className="w-3 h-3 text-teal-500 shrink-0" />
+                Quick Presets:
+              </span>
+              <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 flex-1">
                 {EVENT_PRESETS.map((preset) => {
                   const Icon = preset.icon;
                   return (
@@ -566,51 +557,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       type="button"
                       onClick={() => handleOpenPreset(preset)}
                       title={`Schedule ${preset.label} for ${selectedDateStr}`}
-                      className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border transition-all cursor-pointer whitespace-nowrap hover:scale-105 shadow-2xs shrink-0 ${
+                      className={`flex items-center gap-1 px-2.5 py-0.5 sm:py-1 rounded-full text-[10.5px] sm:text-[11px] font-medium border transition-all cursor-pointer whitespace-nowrap hover:scale-105 shadow-2xs ${
                         isDark
                           ? 'bg-neutral-900/80 hover:bg-neutral-800 border-white/[0.08] text-neutral-300'
                           : 'bg-white hover:bg-stone-50 border-stone-300 text-neutral-800'
                       }`}
                     >
                       <Icon className={`w-3 h-3 ${preset.color} shrink-0`} />
-                      <span className="whitespace-nowrap">{preset.label}</span>
+                      <span>{preset.label}</span>
                     </button>
                   );
                 })}
               </div>
             </div>
-
-            {/* EXPANDABLE D3 EMOTIONAL TRENDS DRAWER */}
-            <AnimatePresence>
-              {isEmotionalTrendsOpen && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                  animate={{ opacity: 1, height: 'auto', marginBottom: 12 }}
-                  exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="relative z-20 overflow-hidden shrink-0"
-                >
-                  <div className="relative p-1">
-                    <button
-                      onClick={() => setIsEmotionalTrendsOpen(false)}
-                      className={`absolute top-4 right-4 z-30 p-1.5 rounded-lg border transition-colors cursor-pointer ${
-                        isDark
-                          ? 'bg-neutral-900/80 hover:bg-neutral-800 text-neutral-400 hover:text-white border-white/[0.1]'
-                          : 'bg-white hover:bg-stone-100 text-stone-600 hover:text-black border-stone-200 shadow-xs'
-                      }`}
-                      title="Close Emotional Trends"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                    <EmotionalTrendsChart
-                      entries={entries}
-                      onSelectEntry={onOpenEntry}
-                      isCompact={true}
-                    />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
 
             {/* MAIN DUAL PANE WORKSPACE (flex-1 min-h-0: Calendar Grid on Left, Day Dossier on Right) */}
             <div className="relative z-10 flex-1 min-h-0 flex flex-col lg:flex-row gap-3 overflow-hidden">
@@ -1237,6 +1196,16 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </div>
         )}
       </AnimatePresence>
+
+      {/* TIMED MEMORY STORIES POPUP VIEWER */}
+      <MemoryStoriesViewer
+        isOpen={isStoriesViewerOpen}
+        onClose={() => setIsStoriesViewerOpen(false)}
+        category={selectedStoryCategory}
+        onSelectCategory={setSelectedStoryCategory}
+        entries={entries}
+        onOpenEntry={onOpenEntry}
+      />
 
     </div>
   );

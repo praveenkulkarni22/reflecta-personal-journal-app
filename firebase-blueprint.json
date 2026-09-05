@@ -120,6 +120,63 @@
         "updatedAt": { "type": "string", "description": "Last modified ISO timestamp" }
       },
       "required": ["id", "userId", "title", "date", "category", "createdAt", "updatedAt"]
+    },
+    "NotificationSetting": {
+      "title": "NotificationSetting",
+      "description": "User notification channel preferences and webhook config",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique notification setting ID" },
+        "userId": { "type": "string", "description": "Owner Firebase UID" },
+        "provider": { "type": "string", "enum": ["slack", "discord", "email"], "description": "Destination provider" },
+        "enabled": { "type": "boolean", "description": "Whether channel notifications are active" },
+        "destinationUrl": { "type": "string", "description": "Webhook URL" },
+        "recipientEmail": { "type": "string", "description": "Recipient email address" },
+        "eventTypes": { "type": "array", "description": "Subscribed event categories (reflection, idea, goal, reminder, highlight)" },
+        "privacyLevel": { "type": "string", "enum": ["minimal", "with_summary"], "description": "Data minimization level" },
+        "channelName": { "type": "string", "description": "User channel label" },
+        "createdAt": { "type": "string", "description": "Creation ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "Last modified ISO timestamp" }
+      },
+      "required": ["id", "userId", "provider", "enabled", "eventTypes", "privacyLevel", "createdAt", "updatedAt"]
+    },
+    "NotificationEventRecord": {
+      "title": "NotificationEventRecord",
+      "description": "Historical audit record of an external notification delivery attempt",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Event ID" },
+        "userId": { "type": "string", "description": "Owner Firebase UID" },
+        "provider": { "type": "string", "enum": ["slack", "discord", "email"], "description": "Target provider" },
+        "eventType": { "type": "string", "description": "Classified event type" },
+        "title": { "type": "string", "description": "Sanitized event title" },
+        "summary": { "type": "string", "description": "Optional minimal summary" },
+        "deliveredAt": { "type": "string", "description": "Delivery ISO timestamp" },
+        "status": { "type": "string", "enum": ["delivered", "failed", "skipped"], "description": "Delivery outcome" },
+        "destinationMasked": { "type": "string", "description": "Masked destination string" },
+        "errorMessage": { "type": "string", "description": "Sanitized error message if failed" },
+        "retryCount": { "type": "number", "description": "Number of retry attempts" }
+      },
+      "required": ["id", "userId", "provider", "eventType", "title", "deliveredAt", "status", "destinationMasked"]
+    },
+    "AdminAuditLog": {
+      "title": "AdminAuditLog",
+      "description": "Server-authored audit log of administrative actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Audit log ID" },
+        "actorUid": { "type": "string", "description": "Administrator UID" },
+        "actorEmail": { "type": "string", "description": "Administrator email" },
+        "action": { "type": "string", "description": "Administrative operation name" },
+        "permission": { "type": "string", "description": "Checked permission" },
+        "targetType": { "type": "string", "description": "Affected entity type" },
+        "targetId": { "type": "string", "description": "Target entity identifier" },
+        "timestamp": { "type": "string", "description": "Action ISO timestamp" },
+        "requestId": { "type": "string", "description": "Correlation request ID" },
+        "outcome": { "type": "string", "enum": ["success", "denied", "failure"], "description": "Authorization or execution outcome" },
+        "metadata": { "type": "object", "description": "Sanitized operational metadata" }
+      },
+      "required": ["id", "actorUid", "action", "permission", "targetType", "timestamp", "requestId", "outcome"]
     }
   },
   "firestore": {
@@ -150,6 +207,18 @@
     "/users/{userId}/events/{eventId}": {
       "schema": { "$ref": "#/entities/CalendarEvent" },
       "description": "User private calendar milestones and events"
+    },
+    "/users/{userId}/notificationSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/NotificationSetting" },
+      "description": "User private notification channel preferences"
+    },
+    "/users/{userId}/notificationEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/NotificationEventRecord" },
+      "description": "User private notification delivery history"
+    },
+    "/adminAuditLogs/{auditId}": {
+      "schema": { "$ref": "#/entities/AdminAuditLog" },
+      "description": "Administrative audit trail created server-side"
     }
   }
 }

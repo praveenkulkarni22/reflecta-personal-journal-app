@@ -13,17 +13,22 @@ import {
   ShieldCheck,
   PlusCircle,
   Clock,
-  Feather
+  Feather,
+  Bell,
+  Shield
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 export type NavTab = 'journal' | 'conversations' | 'archive' | 'calendar' | 'landscape';
 
 interface SidebarProps {
+  userRole?: 'user' | 'admin' | 'super_admin';
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
   onOpenLandscape: () => void;
   onOpenFlipbook: () => void;
+  onOpenNotifications?: () => void;
+  onOpenAdmin?: () => void;
   onNewReflection: () => void;
   isCollapsed: boolean;
   setIsCollapsed: (collapsed: boolean) => void;
@@ -34,10 +39,13 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
+  userRole,
   activeTab,
   setActiveTab,
   onOpenLandscape,
   onOpenFlipbook,
+  onOpenNotifications,
+  onOpenAdmin,
   onNewReflection,
   isCollapsed,
   setIsCollapsed,
@@ -49,7 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  const navItems = [
+  const baseNavItems = [
     {
       id: 'journal' as NavTab,
       label: 'Journal',
@@ -81,8 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'landscape' as NavTab,
       label: 'Inner Landscape',
       subtext: 'Mindspace themes',
-      icon: Compass,
-      onClick: onOpenLandscape
+      icon: Compass
     },
     {
       id: 'flipbook' as any,
@@ -90,8 +97,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
       subtext: 'Contemplative view',
       icon: BookMarked,
       onClick: onOpenFlipbook
-    }
+    },
+    {
+      id: 'notifications' as any,
+      label: 'Alerts & Webhooks',
+      subtext: 'Slack / Discord / Email',
+      icon: Bell,
+      onClick: onOpenNotifications
+    },
+    ...(userRole === 'admin' || userRole === 'super_admin' ? [{
+      id: 'admin' as any,
+      label: 'Admin & RBAC',
+      subtext: 'Telemetry & Logs',
+      icon: Shield,
+      onClick: onOpenAdmin
+    }] : [])
   ];
+
+  const navItems = baseNavItems;
 
   return (
     <aside
