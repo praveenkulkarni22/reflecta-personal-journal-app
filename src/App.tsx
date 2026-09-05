@@ -645,6 +645,8 @@ export default function App() {
           }}
           onOpenLandscape={() => setIsLandscapeModalOpen(true)}
           onOpenFlipbook={() => setIsFlipbookOpen(true)}
+          isFlipbookOpen={isFlipbookOpen}
+          isLandscapeOpen={isLandscapeModalOpen}
           onNewReflection={() => {
             setCurrentEntry({
               title: '',
@@ -808,6 +810,21 @@ export default function App() {
         onSelectEntry={(entry) => {
           setCurrentEntry(entry);
           setActiveTab('journal');
+        }}
+        onNewReflection={() => {
+          setCurrentEntry({
+            title: '',
+            content: '',
+            mood: 'thoughtful',
+            intention: 'free_expression',
+            entryDate: new Date().toISOString().slice(0, 10)
+          });
+          setActiveTab('journal');
+          setIsFlipbookOpen(false);
+        }}
+        onOpenSparks={() => {
+          setIsFlipbookOpen(false);
+          setIsSparksOpen(true);
         }}
       />
 

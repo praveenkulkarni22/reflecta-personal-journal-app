@@ -29,6 +29,8 @@ interface SidebarProps {
   setIsCollapsed: (collapsed: boolean) => void;
   journalCount: number;
   eventsCount: number;
+  isFlipbookOpen?: boolean;
+  isLandscapeOpen?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -40,7 +42,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCollapsed,
   setIsCollapsed,
   journalCount,
-  eventsCount
+  eventsCount,
+  isFlipbookOpen,
+  isLandscapeOpen
 }) => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -176,7 +180,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Navigation Options List */}
       <nav className="flex-1 px-2.5 py-2.5 space-y-1.5 overflow-y-auto overflow-x-hidden">
         {navItems.map((item) => {
-          const isActive = activeTab === item.id;
+          const isActive = item.id === ('flipbook' as any)
+            ? !!isFlipbookOpen
+            : item.id === ('landscape' as any)
+              ? !!isLandscapeOpen
+              : activeTab === item.id;
           const Icon = item.icon;
 
           return (

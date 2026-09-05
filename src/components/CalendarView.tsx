@@ -26,10 +26,12 @@ import {
   ArrowRight,
   Filter,
   Check,
-  Repeat
+  Repeat,
+  TrendingUp
 } from 'lucide-react';
 import { JournalEntry, CalendarEvent, CalendarEventCategory, EventRecurrence } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { EmotionalTrendsChart } from './EmotionalTrendsChart';
 
 interface CalendarViewProps {
   entries: JournalEntry[];
@@ -237,6 +239,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   // Filter state for upcoming events
   const [eventFilter, setEventFilter] = useState<'all' | CalendarEventCategory>('all');
   const [eventRecurrence, setEventRecurrence] = useState<EventRecurrence>('none');
+  const [isEmotionalTrendsOpen, setIsEmotionalTrendsOpen] = useState(false);
 
   // Map entries by date key (YYYY-MM-DD)
   const entriesByDate = useMemo(() => {
@@ -510,8 +513,29 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 </div>
               </div>
 
-              {/* Right: Primary Action Button */}
+              {/* Right: Primary Action Buttons */}
               <div className="flex items-center gap-1.5 shrink-0">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="button"
+                  onClick={() => setIsEmotionalTrendsOpen(!isEmotionalTrendsOpen)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap ${
+                    isEmotionalTrendsOpen
+                      ? isDark
+                        ? 'bg-[#67C3DE]/20 text-[#67C3DE] border-[#67C3DE]/60'
+                        : 'bg-[#67C3DE]/20 text-[#083847] border-[#67C3DE]/70'
+                      : isDark
+                        ? 'bg-neutral-900 hover:bg-neutral-800 text-neutral-200 border-neutral-700'
+                        : 'bg-white hover:bg-stone-100 text-neutral-700 border-stone-300 shadow-2xs'
+                  }`}
+                  title="Toggle D3 Emotional Trends Line Chart"
+                >
+                  <TrendingUp className="w-3.5 h-3.5 text-[#67C3DE]" />
+                  <span className="hidden sm:inline">Emotional Trends (D3)</span>
+                  <span className="sm:hidden">Trends (D3)</span>
+                </motion.button>
+
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
@@ -555,6 +579,38 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 })}
               </div>
             </div>
+
+            {/* EXPANDABLE D3 EMOTIONAL TRENDS DRAWER */}
+            <AnimatePresence>
+              {isEmotionalTrendsOpen && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                  animate={{ opacity: 1, height: 'auto', marginBottom: 12 }}
+                  exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="relative z-20 overflow-hidden shrink-0"
+                >
+                  <div className="relative p-1">
+                    <button
+                      onClick={() => setIsEmotionalTrendsOpen(false)}
+                      className={`absolute top-4 right-4 z-30 p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                        isDark
+                          ? 'bg-neutral-900/80 hover:bg-neutral-800 text-neutral-400 hover:text-white border-white/[0.1]'
+                          : 'bg-white hover:bg-stone-100 text-stone-600 hover:text-black border-stone-200 shadow-xs'
+                      }`}
+                      title="Close Emotional Trends"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                    <EmotionalTrendsChart
+                      entries={entries}
+                      onSelectEntry={onOpenEntry}
+                      isCompact={true}
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* MAIN DUAL PANE WORKSPACE (flex-1 min-h-0: Calendar Grid on Left, Day Dossier on Right) */}
             <div className="relative z-10 flex-1 min-h-0 flex flex-col lg:flex-row gap-3 overflow-hidden">

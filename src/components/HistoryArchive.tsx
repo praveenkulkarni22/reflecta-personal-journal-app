@@ -16,11 +16,13 @@ import {
   Smile,
   Compass,
   MapPin,
-  Image as ImageIcon
+  Image as ImageIcon,
+  TrendingUp
 } from 'lucide-react';
 import { JournalEntry, Conversation, ConversationSummary } from '../types';
 import { formatTimeAgo, formatFullDate, calculateReadingTimeMinutes } from '../lib/utils';
 import { useTheme } from '../context/ThemeContext';
+import { EmotionalTrendsChart } from './EmotionalTrendsChart';
 
 interface HistoryArchiveProps {
   entries: JournalEntry[];
@@ -44,7 +46,7 @@ export const HistoryArchive: React.FC<HistoryArchiveProps> = ({
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  const [activeSection, setActiveSection] = useState<'journals' | 'conversations' | 'summaries'>('journals');
+  const [activeSection, setActiveSection] = useState<'journals' | 'conversations' | 'summaries' | 'trends'>('journals');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMood, setSelectedMood] = useState<string>('all');
 
@@ -90,17 +92,16 @@ export const HistoryArchive: React.FC<HistoryArchiveProps> = ({
             </h2>
           </div>
 
-          {entries.length > 0 && (
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={onOpenFlipbook}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-neutral-950 text-xs font-semibold shadow-[0_4px_14px_rgba(16,185,129,0.3),inset_0_1px_0_rgba(255,255,255,0.3)] transition-all cursor-pointer"
-            >
-              <BookOpen className="w-4 h-4" />
-              <span>Flipbook Reader Mode</span>
-            </motion.button>
-          )}
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={onOpenFlipbook}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
+            title="Open contemplative 3D Flipbook Reader"
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>Flipbook Reader Mode</span>
+          </motion.button>
         </div>
 
         {/* Search & Filter Controls */}
@@ -196,6 +197,20 @@ export const HistoryArchive: React.FC<HistoryArchiveProps> = ({
           >
             <Layers className="w-3.5 h-3.5" />
             <span>Distilled Summaries ({filteredSummaries.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSection('trends')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+              activeSection === 'trends'
+                ? isDark
+                  ? 'bg-[#67C3DE]/20 text-[#67C3DE] border border-[#67C3DE]/40 shadow-[0_2px_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.1)] font-semibold'
+                  : 'bg-[#67C3DE]/20 text-[#083847] border border-[#67C3DE]/60 shadow-sm font-semibold'
+                : isDark ? 'text-neutral-400 hover:text-neutral-200' : 'text-neutral-600 hover:text-neutral-900'
+            }`}
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-[#67C3DE]" />
+            <span>Emotional Trends (D3)</span>
           </button>
 
         </div>
@@ -417,6 +432,20 @@ export const HistoryArchive: React.FC<HistoryArchiveProps> = ({
             ))
           )}
         </div>
+      )}
+
+      {/* SECTION 4: D3 EMOTIONAL TRENDS VISUALIZATION */}
+      {activeSection === 'trends' && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <EmotionalTrendsChart
+            entries={entries}
+            onSelectEntry={onSelectEntry}
+          />
+        </motion.div>
       )}
 
     </motion.div>
