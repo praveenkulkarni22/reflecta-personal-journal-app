@@ -187,7 +187,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
       {/* Main Centered Content */}
       <motion.div
-        initial={skipTransition ? { opacity: 1, y: 0 } : { opacity: 0, y: 16 }}
+        key={`landing-main-${skipTransition ? 'skip' : 'intro'}`}
+        initial={skipTransition ? false : { opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: skipTransition ? 0 : 0.7, ease: [0.16, 1, 0.3, 1] }}
         className="relative z-10 w-full max-w-2xl mx-auto text-center flex flex-col items-center space-y-6"
@@ -243,11 +244,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 {lineObj.wordsWithDelays.map((item, wordIdx) => (
                   <motion.span
                     key={`st1-w-${lineIdx}-${wordIdx}-${skipTransition ? 'instant' : 'flow'}`}
-                    initial={skipTransition ? { opacity: 1, x: 0, filter: 'blur(0px)' } : { opacity: 0, x: -14, filter: 'blur(4px)' }}
+                    initial={skipTransition ? false : { opacity: 0, x: -14, filter: 'blur(4px)' }}
                     animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
                     transition={{
                       duration: skipTransition ? 0 : 0.65,
-                      delay: item.delay,
+                      delay: skipTransition ? 0 : item.delay,
                       ease: [0.16, 1, 0.3, 1]
                     }}
                     className={`inline-block text-sm sm:text-base font-light tracking-wide ${
@@ -271,11 +272,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 {lineObj.wordsWithDelays.map((item, wordIdx) => (
                   <motion.span
                     key={`st2-w-${lineIdx}-${wordIdx}-${skipTransition ? 'instant' : 'flow'}`}
-                    initial={skipTransition ? { opacity: 1, x: 0, filter: 'blur(0px)' } : { opacity: 0, x: -14, filter: 'blur(4px)' }}
+                    initial={skipTransition ? false : { opacity: 0, x: -14, filter: 'blur(4px)' }}
                     animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
                     transition={{
                       duration: skipTransition ? 0 : 0.65,
-                      delay: item.delay,
+                      delay: skipTransition ? 0 : item.delay,
                       ease: [0.16, 1, 0.3, 1]
                     }}
                     className={`inline-block text-sm sm:text-base tracking-wide ${
@@ -298,9 +299,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
         {/* Core Statement Appearing after poem completes */}
         <motion.p
-          initial={skipTransition ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
+          key={`landing-statement-${skipTransition ? 'skip' : 'intro'}`}
+          initial={skipTransition ? false : { opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: skipTransition ? 0.1 : 0.7, delay: finalStatementDelay }}
+          transition={{ duration: skipTransition ? 0 : 0.7, delay: skipTransition ? 0 : finalStatementDelay }}
           id="landing-statement"
           className={`text-base sm:text-lg font-medium tracking-wide pt-1 ${
             isDark ? 'text-teal-300' : 'text-teal-800 font-semibold'
@@ -311,9 +313,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
         {/* Pill / Badge */}
         <motion.div
-          initial={skipTransition ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.9 }}
+          key={`landing-pill-${skipTransition ? 'skip' : 'intro'}`}
+          initial={skipTransition ? false : { opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: skipTransition ? 0.1 : 0.6, delay: skipTransition ? 0 : finalStatementDelay + 0.2 }}
+          transition={{ duration: skipTransition ? 0 : 0.6, delay: skipTransition ? 0 : finalStatementDelay + 0.2 }}
           whileHover={{ scale: 1.05 }}
           id="landing-pill"
           className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-medium tracking-wide transition-all ${
@@ -328,9 +331,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
         {/* Action Card with Apple-Grade Skeuomorphic Depth */}
         <motion.div
-          initial={skipTransition ? { opacity: 1, y: 0 } : { opacity: 0, y: 16 }}
+          key={`landing-auth-card-${skipTransition ? 'skip' : 'intro'}`}
+          initial={skipTransition ? false : { opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: skipTransition ? 0.15 : 0.7, delay: skipTransition ? 0 : finalStatementDelay + 0.3 }}
+          transition={{ duration: skipTransition ? 0 : 0.7, delay: skipTransition ? 0 : finalStatementDelay + 0.3 }}
           whileHover={{ y: -2 }}
           id="landing-auth-card"
           className={`w-full max-w-md mt-4 p-6 sm:p-7 rounded-3xl backdrop-blur-2xl transition-all duration-300 space-y-4 ${

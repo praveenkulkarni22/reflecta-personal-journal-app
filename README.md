@@ -217,18 +217,23 @@ service cloud.firestore {
 
 ## 11. Cloud Run Deployment
 
-Deploy directly to Google Cloud Run with secret binding:
+To support secure dynamic deployment on any platform, there are no hardcoded administrator email fallbacks in the codebase. Setting the `ADMIN_EMAILS` environment variable is **strictly mandatory** for the server to successfully boot up.
+
+Deploy directly to Google Cloud Run specifying your bootstrap administrators:
 
 ```bash
-# Build and deploy container to Cloud Run
+# Build and deploy container to Cloud Run with mandatory bootstrap administrator emails
 gcloud run deploy reflecta \
   --source . \
   --region us-central1 \
   --platform managed \
   --allow-unauthenticated \
   --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+  --set-env-vars="ADMIN_EMAILS=admin@example.com" \
   --update-labels=dev-tutorial=cloud-run-ai-challenge
 ```
+
+> **CRITICAL MANDATORY NOTE**: Stating `ADMIN_EMAILS` is a requirement. The variable expects a comma-separated list of emails (e.g., `admin1@example.com,admin2@example.com`). These accounts receive dynamic bootstrap privileges inside the **Admin Panel > User Registry** on first sign-in. If this environment variable is missing, the server will crash on startup with a clear configuration validation error.
 
 ### Challenge Verification Label
 Verify the required challenge label is attached to your Cloud Run service:

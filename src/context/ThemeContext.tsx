@@ -9,7 +9,7 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType>({
-  theme: 'dark',
+  theme: 'light',
   toggleTheme: () => {},
   setTheme: () => {}
 });
@@ -19,9 +19,9 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       const saved = localStorage.getItem('reflecta-theme');
       if (saved === 'light' || saved === 'dark') return saved;
-      return 'dark';
+      return 'light';
     } catch {
-      return 'dark';
+      return 'light';
     }
   });
 

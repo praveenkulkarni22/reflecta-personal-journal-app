@@ -24,11 +24,11 @@ const databaseId = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestor
   ? firebaseConfig.firestoreDatabaseId
   : undefined;
 
-// Initialize Firestore with long-polling auto-detection for robust iframe connectivity
+// Initialize Firestore with robust long-polling for sandboxed iframe connectivity
 let firestoreInstance: Firestore;
 try {
   firestoreInstance = initializeFirestore(app, {
-    experimentalAutoDetectLongPolling: true,
+    experimentalForceLongPolling: true,
     ignoreUndefinedProperties: true
   }, databaseId);
 } catch {
@@ -40,12 +40,16 @@ export const db = firestoreInstance;
 
 // Test Firestore backend connection probe asynchronously without blocking UI
 async function testConnection() {
+  if (typeof window === 'undefined') return;
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.info("Firestore connection: Client is operating in offline mode until network backend syncs.");
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return;
     }
+    await getDocFromServer(doc(db, 'test', 'connection')).catch(() => {
+      // Benign probe check: Suppress initial offline/unauthenticated response
+    });
+  } catch {
+    // Suppress background probe errors
   }
 }
 testConnection();

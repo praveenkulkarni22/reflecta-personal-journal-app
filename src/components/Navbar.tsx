@@ -19,7 +19,7 @@ import { SanctuaryAmbienceControl } from './SanctuaryAmbienceControl';
 interface NavbarProps {
   user: UserProfile | null;
   userRole?: 'user' | 'admin' | 'super_admin';
-  activeTab: 'journal' | 'conversations' | 'archive' | 'calendar' | 'landscape';
+  activeTab: 'journal' | 'conversations' | 'archive' | 'calendar' | 'landscape' | 'notifications' | 'admin';
   onSignIn: () => void;
   onSignOut: () => void;
   onOpenSparks: () => void;
@@ -51,7 +51,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     conversations: 'Reflect Dialogue (AI)',
     calendar: 'Memory Calendar',
     archive: 'Volume Archive',
-    landscape: 'Inner Landscape'
+    landscape: 'Inner Landscape',
+    notifications: 'Alerts & Webhooks',
+    admin: 'Admin Control & RBAC'
   };
 
   return (

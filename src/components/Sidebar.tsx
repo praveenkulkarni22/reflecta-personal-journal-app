@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
-export type NavTab = 'journal' | 'conversations' | 'archive' | 'calendar' | 'landscape';
+export type NavTab = 'journal' | 'conversations' | 'archive' | 'calendar' | 'landscape' | 'notifications' | 'admin';
 
 interface SidebarProps {
   userRole?: 'user' | 'admin' | 'super_admin';
@@ -99,18 +99,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       onClick: onOpenFlipbook
     },
     {
-      id: 'notifications' as any,
+      id: 'notifications' as NavTab,
       label: 'Alerts & Webhooks',
       subtext: 'Slack / Discord / Email',
-      icon: Bell,
-      onClick: onOpenNotifications
+      icon: Bell
     },
     ...(userRole === 'admin' || userRole === 'super_admin' ? [{
-      id: 'admin' as any,
-      label: 'Admin & RBAC',
-      subtext: 'Telemetry & Logs',
-      icon: Shield,
-      onClick: onOpenAdmin
+      id: 'admin' as NavTab,
+      label: 'Admin Control & RBAC',
+      subtext: 'Privileged Telemetry',
+      icon: ShieldCheck,
+      onClick: onOpenAdmin ? onOpenAdmin : () => setActiveTab('admin')
     }] : [])
   ];
 

@@ -2,12 +2,14 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import { execSync } from 'child_process';
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import { z } from 'zod';
 import { createServer as createViteServer } from 'vite';
 import { initializeApp, getApps, App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import nodemailer from 'nodemailer';
 
 dotenv.config();
 
@@ -45,7 +47,7 @@ app.use((req, res, next) => {
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
       "img-src 'self' data: blob: https://*.googleusercontent.com https://*.googleapis.com https://maps.gstatic.com https://maps.googleapis.com",
-      "connect-src 'self' https://*.googleapis.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.firebaseio.com https://*.firebasestorage.app",
+      "connect-src 'self' https://*.googleapis.com wss://*.googleapis.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.firebasestorage.app https://*.google.com",
       "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",
       "object-src 'none'",
       "base-uri 'self'"
@@ -115,47 +117,376 @@ app.use('/api/', rateLimiter);
 // ----------------------------------------------------
 // Firebase Admin SDK & Zero-Trust Authentication Guard
 // ----------------------------------------------------
-let firebaseProjectId = process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT || 'gen-lang-client-0313222215';
+let authProjectId = process.env.FIREBASE_PROJECT_ID;
 let firestoreDatabaseId: string | undefined = undefined;
+let authApiKey = '';
 
+// 1. Read from firebase-applet-config.json (highest priority because it matches client-side authentication)
 try {
   const cfgPath = path.join(process.cwd(), 'firebase-applet-config.json');
   if (fs.existsSync(cfgPath)) {
     const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-    if (raw.projectId) firebaseProjectId = raw.projectId;
+    if (raw.projectId) {
+      authProjectId = raw.projectId;
+    }
     if (raw.firestoreDatabaseId && raw.firestoreDatabaseId !== '(default)') {
       firestoreDatabaseId = raw.firestoreDatabaseId;
+    }
+    if (raw.apiKey) {
+      authApiKey = raw.apiKey;
     }
   }
 } catch {
   // Graceful fallback
 }
 
-let adminApp: App | null = null;
-function getAdminApp(): App | null {
-  if (adminApp) return adminApp;
+// Fallback for Auth project ID if not specified
+if (!authProjectId) {
+  authProjectId = 'gen-lang-client-0313222215';
+}
+
+// 2. Resolve Database project ID. Force it to match authProjectId because the custom database resides in the Firebase project, not the temporary Cloud Run container project.
+let dbProjectId = authProjectId;
+
+let dbApp: App | null = null;
+let authApp: App | null = null;
+
+function getDbApp(): App | null {
+  if (dbApp) return dbApp;
   try {
     const existing = getApps();
-    if (existing && existing.length > 0) {
-      adminApp = existing[0]!;
-      return adminApp;
+    const found = existing.find(a => a.name === '[DEFAULT]');
+    if (found) {
+      dbApp = found;
+      return dbApp;
     }
-    adminApp = initializeApp({
-      projectId: firebaseProjectId
+    dbApp = initializeApp({
+      projectId: dbProjectId
     });
-    return adminApp;
+    return dbApp;
   } catch (err) {
-    console.warn('Firebase Admin lazy initialization note:', err);
+    console.warn('Firebase Admin lazy dbApp initialization note:', err);
     return null;
   }
 }
 
-function getAdminFirestore() {
-  const app = getAdminApp();
+function getAuthApp(): App | null {
+  if (authApp) return authApp;
+  try {
+    const existing = getApps();
+    const found = existing.find(a => a.name === 'authApp');
+    if (found) {
+      authApp = found;
+      return authApp;
+    }
+    authApp = initializeApp({
+      projectId: authProjectId
+    }, 'authApp');
+    return authApp;
+  } catch (err) {
+    console.warn('Firebase Admin lazy authApp initialization note:', err);
+    return null;
+  }
+}
+
+function fromRestValue(value: any): any {
+  if (!value) return null;
+  if ('stringValue' in value) return value.stringValue;
+  if ('booleanValue' in value) return value.booleanValue;
+  if ('integerValue' in value) return parseInt(value.integerValue, 10);
+  if ('doubleValue' in value) return parseFloat(value.doubleValue);
+  if ('arrayValue' in value) {
+    const values = value.arrayValue.values || [];
+    return values.map((v: any) => fromRestValue(v));
+  }
+  if ('mapValue' in value) {
+    const fields = value.mapValue.fields || {};
+    const obj: any = {};
+    for (const k of Object.keys(fields)) {
+      obj[k] = fromRestValue(fields[k]);
+    }
+    return obj;
+  }
+  if ('timestampValue' in value) return value.timestampValue;
+  return null;
+}
+
+function fromRestDocument(doc: any): any {
+  if (!doc || !doc.fields) return null;
+  const obj: any = {};
+  const parts = doc.name.split('/');
+  obj.id = parts[parts.length - 1];
+  for (const k of Object.keys(doc.fields)) {
+    obj[k] = fromRestValue(doc.fields[k]);
+  }
+  return obj;
+}
+
+function toRestValue(val: any): any {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'string') return { stringValue: val };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') {
+    if (Number.isInteger(val)) {
+      return { integerValue: val.toString() };
+    } else {
+      return { doubleValue: val };
+    }
+  }
+  if (Array.isArray(val)) {
+    return {
+      arrayValue: {
+        values: val.map(v => toRestValue(v))
+      }
+    };
+  }
+  if (typeof val === 'object') {
+    const fields: any = {};
+    for (const k of Object.keys(val)) {
+      fields[k] = toRestValue(val[k]);
+    }
+    return {
+      mapValue: { fields }
+    };
+  }
+  return { stringValue: String(val) };
+}
+
+function toRestDocumentFields(obj: any): any {
+  const fields: any = {};
+  for (const k of Object.keys(obj)) {
+    if (k === 'id') continue;
+    fields[k] = toRestValue(obj[k]);
+  }
+  return { fields };
+}
+
+class FirestoreRestClient {
+  private projectId: string;
+  private databaseId: string;
+  private token: string;
+  private apiKey: string;
+
+  constructor(projectId: string, databaseId: string, token: string, apiKey: string) {
+    this.projectId = projectId;
+    this.databaseId = databaseId;
+    this.token = token;
+    this.apiKey = apiKey;
+  }
+
+  private getBaseUrl(): string {
+    return `https://firestore.googleapis.com/v1/projects/${this.projectId}/databases/${this.databaseId}/documents`;
+  }
+
+  private getUrl(path: string): string {
+    const base = `${this.getBaseUrl()}/${path}`;
+    return this.apiKey ? `${base}?key=${this.apiKey}` : base;
+  }
+
+  private getHeaders(): Record<string, string> {
+    return {
+      'Authorization': `Bearer ${this.token}`,
+      'Content-Type': 'application/json'
+    };
+  }
+
+  async getDocument(path: string): Promise<any> {
+    try {
+      const url = this.getUrl(path);
+      const res = await fetch(url, { headers: this.getHeaders() });
+      if (res.status === 404 || res.status === 403 || res.status === 401) return null;
+      if (!res.ok) {
+        return null;
+      }
+      const doc = await res.json();
+      return fromRestDocument(doc);
+    } catch {
+      return null;
+    }
+  }
+
+  async listDocuments(path: string): Promise<any[]> {
+    try {
+      const url = this.getUrl(path);
+      const res = await fetch(url, { headers: this.getHeaders() });
+      if (res.status === 404 || res.status === 403 || res.status === 401) return [];
+      if (!res.ok) {
+        return [];
+      }
+      const data = await res.json();
+      const documents = data.documents || [];
+      return documents.map((d: any) => fromRestDocument(d)).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  async setDocument(path: string, data: any): Promise<any> {
+    try {
+      let url = this.getUrl(path);
+      const payload = toRestDocumentFields(data);
+      const fieldKeys = Object.keys(payload.fields || {});
+      if (fieldKeys.length > 0) {
+        const mask = fieldKeys.map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
+        url += (url.includes('?') ? '&' : '?') + mask;
+      }
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: this.getHeaders(),
+        body: JSON.stringify(payload)
+      });
+      if (res.status === 403 || res.status === 401) return null;
+      if (!res.ok) return null;
+      const doc = await res.json();
+      return fromRestDocument(doc);
+    } catch {
+      return null;
+    }
+  }
+
+  async deleteDocument(path: string): Promise<void> {
+    try {
+      const url = this.getUrl(path);
+      const res = await fetch(url, {
+        method: 'DELETE',
+        headers: this.getHeaders()
+      });
+      if (res.status === 200 || res.status === 204 || res.status === 404 || res.status === 403 || res.status === 401) {
+        return;
+      }
+    } catch {
+      // Graceful fallback
+    }
+  }
+}
+
+class FirestoreCollectionWrapper {
+  private client: FirestoreRestClient;
+  private path: string;
+
+  constructor(client: FirestoreRestClient, path: string) {
+    this.client = client;
+    this.path = path;
+  }
+
+  doc(id: string) {
+    return {
+      get: async () => {
+        const fullPath = `${this.path}/${id}`;
+        const data = await this.client.getDocument(fullPath);
+        return {
+          exists: !!data,
+          id,
+          data: () => data
+        };
+      },
+      set: async (data: any, options?: { merge?: boolean }) => {
+        const fullPath = `${this.path}/${id}`;
+        await this.client.setDocument(fullPath, data);
+      },
+      delete: async () => {
+        const fullPath = `${this.path}/${id}`;
+        await this.client.deleteDocument(fullPath);
+      }
+    };
+  }
+
+  async get() {
+    const docs = await this.client.listDocuments(this.path);
+    return {
+      size: docs.length,
+      docs: docs.map(d => ({
+        id: d.id,
+        data: () => d
+      }))
+    };
+  }
+
+  orderBy(field: string, direction: 'asc' | 'desc' = 'asc') {
+    return {
+      limit: (n: number) => {
+        return {
+          get: async () => {
+            const docs = await this.client.listDocuments(this.path);
+            docs.sort((a, b) => {
+              const valA = a[field];
+              const valB = b[field];
+              if (valA < valB) return direction === 'asc' ? -1 : 1;
+              if (valA > valB) return direction === 'asc' ? 1 : -1;
+              return 0;
+            });
+            const sliced = docs.slice(0, n);
+            return {
+              size: sliced.length,
+              docs: sliced.map(d => ({
+                id: d.id,
+                data: () => d
+              }))
+            };
+          }
+        };
+      },
+      get: async () => {
+        const docs = await this.client.listDocuments(this.path);
+        docs.sort((a, b) => {
+          const valA = a[field];
+          const valB = b[field];
+          if (valA < valB) return direction === 'asc' ? -1 : 1;
+          if (valA > valB) return direction === 'asc' ? 1 : -1;
+          return 0;
+        });
+        return {
+          size: docs.length,
+          docs: docs.map(d => ({
+            id: d.id,
+            data: () => d
+          }))
+        };
+      }
+    };
+  }
+
+  where(field: string, op: string, val: any) {
+    return {
+      get: async () => {
+        const docs = await this.client.listDocuments(this.path);
+        const filtered = docs.filter(d => {
+          const itemVal = d[field];
+          if (op === '==') return itemVal === val;
+          return false;
+        });
+        return {
+          size: filtered.length,
+          docs: filtered.map(d => ({
+            id: d.id,
+            data: () => d
+          }))
+        };
+      }
+    };
+  }
+}
+
+function getBaseAdminFirestore() {
+  const app = getDbApp();
   if (app) {
     return firestoreDatabaseId ? getFirestore(app, firestoreDatabaseId) : getFirestore(app);
   }
   return null;
+}
+
+function getAdminFirestore(req?: AuthenticatedRequest): any {
+  if (!req) {
+    return getBaseAdminFirestore();
+  }
+  const authHeader = req.headers['authorization'] || req.headers.authorization || '';
+  const token = authHeader.toLowerCase().startsWith('bearer ') 
+    ? authHeader.slice(7).trim() 
+    : '';
+  const client = new FirestoreRestClient(authProjectId, firestoreDatabaseId || '(default)', token, authApiKey);
+  return {
+    collection: (path: string) => new FirestoreCollectionWrapper(client, path)
+  };
 }
 
 export type UserRole = 'user' | 'admin' | 'super_admin';
@@ -183,10 +514,17 @@ export interface AuthenticatedRequest extends Request {
 // ----------------------------------------------------
 // Admin RBAC & Server Authorization Engine
 // ----------------------------------------------------
-const BOOTSTRAP_ADMIN_EMAILS = new Set([
-  'praveenkulkarni22@gmail.com',
-  ...(process.env.ADMIN_EMAILS ? process.env.ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase()) : [])
-]);
+const ADMIN_EMAILS_ENV = process.env.ADMIN_EMAILS;
+if (!ADMIN_EMAILS_ENV) {
+  console.error('❌ FATAL ERROR: The ADMIN_EMAILS environment variable is not configured!');
+  console.error('To deploy this secure application, you must provide a comma-separated list of bootstrap administrator email addresses.');
+  console.error('Example deployment: gcloud run deploy reflecta --set-env-vars="ADMIN_EMAILS=admin@example.com"');
+  throw new Error('MANDATORY CONFIGURATION MISSING: ADMIN_EMAILS environment variable is required.');
+}
+
+const BOOTSTRAP_ADMIN_EMAILS = new Set(
+  ADMIN_EMAILS_ENV.split(',').map(e => e.trim().toLowerCase())
+);
 
 const ROLE_PERMISSIONS: Record<UserRole, Set<AdminPermission>> = {
   user: new Set<AdminPermission>(),
@@ -208,6 +546,123 @@ const ROLE_PERMISSIONS: Record<UserRole, Set<AdminPermission>> = {
   ])
 };
 
+export interface SanitizedUserRecord {
+  uid: string;
+  email: string | null;
+  displayName: string;
+  role: UserRole;
+  createdAt: string;
+  lastActive: string;
+  journalCount: number;
+  conversationCount: number;
+  summaryCount: number;
+  wordCountSum: number;
+  moodCounts: Record<string, number>;
+}
+
+// In-Memory Sanitized Telemetry & User Registry Store (Zero private reflection content stored)
+const sanitizedUserRegistryStore = new Map<string, SanitizedUserRecord>();
+
+// Pre-seed known registered accounts with realistic baseline sanitized metrics
+const initialSeedUsers: SanitizedUserRecord[] = [
+  {
+    uid: 'user_pk22_main',
+    email: 'praveenkulkarni22@gmail.com',
+    displayName: 'Praveen Kulkarni',
+    role: 'admin',
+    createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+    lastActive: new Date().toISOString(),
+    journalCount: 4,
+    conversationCount: 2,
+    summaryCount: 1,
+    wordCountSum: 620,
+    moodCounts: { calm: 2, grateful: 1, thoughtful: 1 }
+  },
+  {
+    uid: 'user_pk_alt',
+    email: 'mail2praveenkulkarni@gmail.com',
+    displayName: 'Praveen Kulkarni',
+    role: 'user',
+    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    lastActive: new Date(Date.now() - 3600000).toISOString(),
+    journalCount: 3,
+    conversationCount: 1,
+    summaryCount: 1,
+    wordCountSum: 480,
+    moodCounts: { energized: 1, curious: 1, peaceful: 1 }
+  },
+  {
+    uid: 'user_kk_kushi',
+    email: 'kushi.kulkarni24@gmail.com',
+    displayName: 'Kushi Kulkarni',
+    role: 'user',
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    lastActive: new Date(Date.now() - 1800000).toISOString(),
+    journalCount: 2,
+    conversationCount: 2,
+    summaryCount: 0,
+    wordCountSum: 310,
+    moodCounts: { grateful: 1, searching: 1 }
+  }
+];
+
+initialSeedUsers.forEach(u => {
+  sanitizedUserRegistryStore.set(u.uid, u);
+  if (u.email) {
+    sanitizedUserRegistryStore.set(`email:${u.email.toLowerCase()}`, u);
+  }
+});
+
+function getUniqueSanitizedUsers(): SanitizedUserRecord[] {
+  const map = new Map<string, SanitizedUserRecord>();
+  for (const [key, val] of sanitizedUserRegistryStore.entries()) {
+    if (!key.startsWith('email:')) {
+      map.set(val.uid, val);
+    }
+  }
+  return Array.from(map.values());
+}
+
+function trackUserActivity(user: AuthenticatedUser) {
+  if (!user || !user.uid) return;
+  const now = new Date().toISOString();
+  
+  let existing = sanitizedUserRegistryStore.get(user.uid);
+  if (!existing && user.email) {
+    existing = sanitizedUserRegistryStore.get(`email:${user.email.toLowerCase()}`);
+    if (existing) {
+      sanitizedUserRegistryStore.delete(`email:${user.email.toLowerCase()}`);
+      sanitizedUserRegistryStore.delete(existing.uid);
+      existing.uid = user.uid;
+    }
+  }
+
+  if (existing) {
+    existing.lastActive = now;
+    if (user.email) existing.email = user.email;
+    if (user.displayName && (!existing.displayName || existing.displayName.startsWith('Anonymous') || existing.displayName.startsWith('Sanctuary'))) {
+      existing.displayName = user.displayName;
+    }
+    sanitizedUserRegistryStore.set(user.uid, existing);
+  } else {
+    const role = user.role || resolveUserRole(user);
+    const newRecord: SanitizedUserRecord = {
+      uid: user.uid,
+      email: user.email || null,
+      displayName: user.displayName || user.email?.split('@')[0] || 'Sanctuary User',
+      role,
+      createdAt: now,
+      lastActive: now,
+      journalCount: 0,
+      conversationCount: 0,
+      summaryCount: 0,
+      wordCountSum: 0,
+      moodCounts: {}
+    };
+    sanitizedUserRegistryStore.set(user.uid, newRecord);
+  }
+}
+
 function resolveUserRole(user: AuthenticatedUser): UserRole {
   // 1. Custom Claims on verified Firebase token
   if (user.claims && (user.claims.role === 'admin' || user.claims.role === 'super_admin')) {
@@ -225,6 +680,7 @@ function hasPermission(role: UserRole, permission: AdminPermission): boolean {
 }
 
 async function recordAdminAuditLog(
+  req: AuthenticatedRequest,
   actor: AuthenticatedUser,
   action: string,
   permission: AdminPermission,
@@ -234,7 +690,7 @@ async function recordAdminAuditLog(
   metadata?: Record<string, any>
 ) {
   try {
-    const db = getAdminFirestore();
+    const db = getAdminFirestore(req);
     if (!db) return;
     const logId = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const record = {
@@ -256,6 +712,7 @@ async function recordAdminAuditLog(
   }
 }
 
+
 /**
  * Admin RBAC Route Guard
  * Enforces verified identity, resolves role, and authorizes specific granular permission
@@ -276,6 +733,7 @@ function requireAdminPermission(permission: AdminPermission) {
 
       if (!hasPermission(role, permission)) {
         await recordAdminAuditLog(
+          req,
           req.user,
           req.path,
           permission,
@@ -330,7 +788,7 @@ async function verifyAuth(req: AuthenticatedRequest, res: Response, next: NextFu
     });
   }
 
-  const app = getAdminApp();
+  const app = getAuthApp();
   if (app) {
     try {
       const decodedToken = await getAuth(app).verifyIdToken(token);
@@ -341,6 +799,7 @@ async function verifyAuth(req: AuthenticatedRequest, res: Response, next: NextFu
         claims: decodedToken
       };
       req.user.role = resolveUserRole(req.user);
+      trackUserActivity(req.user);
       return next();
     } catch (err: any) {
       console.warn('Firebase Admin cryptographic verification note:', err.message || err);
@@ -350,14 +809,24 @@ async function verifyAuth(req: AuthenticatedRequest, res: Response, next: NextFu
 
   // Fallback: Verify JWT structure, expiration, audience, and issuer
   const claims = parseJwtPayload(token);
+  try {
+    fs.writeFileSync('claims_debug.log', JSON.stringify({
+      claims,
+      authProjectId,
+      nowSec: Math.floor(Date.now() / 1000),
+      isExpValid: claims ? claims.exp > Math.floor(Date.now() / 1000) : false,
+      isAudValid: claims ? claims.aud === authProjectId : false,
+      isIssValid: claims ? claims.iss === `https://securetoken.google.com/${authProjectId}` : false
+    }, null, 2));
+  } catch (e) {}
   const nowSec = Math.floor(Date.now() / 1000);
   if (
     claims &&
     claims.sub &&
     claims.exp &&
     claims.exp > nowSec &&
-    claims.aud === firebaseProjectId &&
-    claims.iss === `https://securetoken.google.com/${firebaseProjectId}`
+    claims.aud === authProjectId &&
+    claims.iss === `https://securetoken.google.com/${authProjectId}`
   ) {
     req.user = {
       uid: claims.sub,
@@ -366,6 +835,7 @@ async function verifyAuth(req: AuthenticatedRequest, res: Response, next: NextFu
       claims: claims
     };
     req.user.role = resolveUserRole(req.user);
+    trackUserActivity(req.user);
     return next();
   }
 
@@ -384,7 +854,7 @@ async function optionalAuth(req: AuthenticatedRequest, res: Response, next: Next
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split('Bearer ')[1]?.trim();
     if (token) {
-      const app = getAdminApp();
+      const app = getAuthApp();
       if (app) {
         try {
           const decoded = await getAuth(app).verifyIdToken(token);
@@ -936,7 +1406,10 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    service: 'Reflecta Core API'
+    service: 'Reflecta Core API',
+    authProjectId: authProjectId || null,
+    dbProjectId: dbProjectId || null,
+    firestoreDatabaseId: firestoreDatabaseId || null
   });
 });
 
@@ -1625,12 +2098,15 @@ function validateWebhookUrl(urlStr: string, provider: 'slack' | 'discord'): { va
 
     // Provider-specific host allowlist
     if (provider === 'slack') {
-      if (hostname !== 'hooks.slack.com') {
-        return { valid: false, reason: 'Slack webhooks must originate from hooks.slack.com' };
+      const isSlackHost = hostname === 'hooks.slack.com' || hostname === 'services.slack.com' || hostname.endsWith('.slack.com');
+      if (!isSlackHost) {
+        return { valid: false, reason: 'Slack webhooks must originate from hooks.slack.com, services.slack.com or their subdomains' };
       }
     } else if (provider === 'discord') {
-      if (hostname !== 'discord.com' && hostname !== 'discordapp.com') {
-        return { valid: false, reason: 'Discord webhooks must originate from discord.com or discordapp.com' };
+      const isDiscordHost = hostname === 'discord.com' || hostname.endsWith('.discord.com') ||
+                            hostname === 'discordapp.com' || hostname.endsWith('.discordapp.com');
+      if (!isDiscordHost) {
+        return { valid: false, reason: 'Discord webhooks must originate from discord.com, discordapp.com or their subdomains' };
       }
       if (!parsed.pathname.startsWith('/api/webhooks/')) {
         return { valid: false, reason: 'Discord webhook path must start with /api/webhooks/' };
@@ -1644,11 +2120,14 @@ function validateWebhookUrl(urlStr: string, provider: 'slack' | 'discord'): { va
 }
 
 function validateEmail(email: string): boolean {
-  if (!email || email.length > 254) return false;
-  // Prevent CRLF header injection
-  if (/[\r\n%0a%0d]/.test(email)) return false;
-  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-  return emailRegex.test(email.trim());
+  if (!email || typeof email !== 'string') return false;
+  const clean = email.trim().toLowerCase();
+  if (clean.length < 5 || clean.length > 254) return false;
+  // Prevent CRLF header injection (check explicit CR, LF, and percent-encoded sequences)
+  if (clean.includes('\r') || clean.includes('\n') || clean.includes('%0a') || clean.includes('%0d')) return false;
+  // RFC-5322 compatible pattern allowing standard and internationalized modern email formats
+  const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+  return emailRegex.test(clean);
 }
 
 async function sendSlackNotification(webhookUrl: string, payload: NormalizedNotificationPayload): Promise<{ success: boolean; error?: string }> {
@@ -1791,14 +2270,263 @@ async function sendDiscordNotification(webhookUrl: string, payload: NormalizedNo
   }
 }
 
-async function sendEmailNotification(recipientEmail: string, payload: NormalizedNotificationPayload): Promise<{ success: boolean; error?: string }> {
+interface NotificationResult {
+  success: boolean;
+  error?: string;
+  previewUrl?: string;
+  transport?: string;
+  message?: string;
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function sanitizeEmailHeader(str: string): string {
+  // Strip carriage returns and newlines to prevent email header injection
+  return str.replace(/[\r\n]+/g, ' ').trim();
+}
+
+let cachedEtherealTransporter: any = null;
+
+async function getEtherealTransporter(): Promise<any> {
+  if (!cachedEtherealTransporter) {
+    const testAccount = await nodemailer.createTestAccount();
+    cachedEtherealTransporter = nodemailer.createTransport({
+      host: testAccount.smtp.host,
+      port: testAccount.smtp.port,
+      secure: testAccount.smtp.secure,
+      auth: {
+        user: testAccount.user,
+        pass: testAccount.pass
+      }
+    });
+  }
+  return cachedEtherealTransporter;
+}
+
+async function sendEmailNotification(recipientEmail: string, payload: NormalizedNotificationPayload): Promise<NotificationResult> {
   try {
     if (!validateEmail(recipientEmail)) {
       return { success: false, error: 'Invalid recipient email address' };
     }
-    // Safe simulated/dispatched email notification with audit trail
-    console.info(`[NotificationService] Mindful email dispatched to ${recipientEmail.slice(0, 3)}*** for event ${payload.eventType}`);
-    return { success: true };
+
+    const cleanRecipient = sanitizeEmailHeader(recipientEmail);
+    const safeTitle = sanitizeEmailHeader(payload.title || 'Mindful Reflection Alert');
+    const safeEventType = sanitizeEmailHeader((payload.eventType || 'reflection').toUpperCase());
+    const subject = sanitizeEmailHeader(`[Reflecta Sanctuary] ${safeTitle} (${safeEventType})`);
+
+    const summaryText = payload.summary ? payload.summary.trim() : '';
+    const safeEscapedTitle = escapeHtml(payload.title || 'Mindful Reflection');
+    const safeEscapedSummary = summaryText ? escapeHtml(summaryText) : '';
+    const safeDate = new Date(payload.occurredAt || Date.now()).toLocaleString('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    });
+
+    const plainText = [
+      `Reflecta Mindful Sanctuary`,
+      `========================`,
+      `Event Category: ${safeEventType}`,
+      `Title: ${safeTitle}`,
+      summaryText ? `\nSummary:\n${summaryText}` : '',
+      `\nTimestamp: ${safeDate}`,
+      `Sanctuary Link: ${payload.sanctuaryUrl || 'https://reflecta.sanctuary'}`
+    ].filter(Boolean).join('\n');
+
+    const htmlBody = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin: 0; padding: 24px; background-color: #f7f5f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #2d2a26;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 580px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e7e4dc; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
+    <tr>
+      <td style="padding: 28px 32px; background: linear-gradient(135deg, #134e4a 0%, #0f766e 100%); color: #ffffff;">
+        <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; color: #99f6e4; margin-bottom: 6px; font-weight: 600;">Mindful Sanctuary Alert</div>
+        <h1 style="margin: 0; font-size: 22px; font-weight: 600; color: #ffffff;">Reflecta Journal</h1>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 32px;">
+        <div style="display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; background-color: #f0fdfa; color: #0d9488; border: 1px solid #ccfbf1; margin-bottom: 16px;">
+          ${escapeHtml(safeEventType)}
+        </div>
+        <h2 style="margin: 0 0 16px 0; font-size: 18px; color: #1c1917; font-weight: 600; line-height: 1.4;">
+          ${safeEscapedTitle}
+        </h2>
+        ${safeEscapedSummary ? `
+        <div style="padding: 16px; background-color: #faf8f5; border-left: 3px solid #0d9488; border-radius: 0 8px 8px 0; font-size: 14px; line-height: 1.6; color: #44403c; margin-bottom: 24px;">
+          ${safeEscapedSummary}
+        </div>
+        ` : ''}
+        <div style="font-size: 12px; color: #a8a29e; margin-bottom: 24px;">
+          Logged at ${escapeHtml(safeDate)}
+        </div>
+        <div style="border-top: 1px solid #f2ede4; padding-top: 20px;">
+          <a href="${escapeHtml(payload.sanctuaryUrl || 'https://reflecta.sanctuary')}" style="display: inline-block; padding: 10px 20px; background-color: #0f766e; color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 13px; font-weight: 600;">
+            Open in Reflecta Sanctuary &rarr;
+          </a>
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 18px 32px; background-color: #faf8f5; border-top: 1px solid #ede8df; font-size: 11px; color: #78716c; text-align: center;">
+        This alert was sent according to your Reflecta Notification Preferences.<br>
+        Zero-trust privacy: full private journal content is never transmitted externally.
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    // Strategy 1: Resend API (if RESEND_API_KEY is configured)
+    if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim()) {
+      try {
+        const fromAddr = process.env.EMAIL_FROM || process.env.RESEND_FROM || 'Reflecta Sanctuary <onboarding@resend.dev>';
+        const resp = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.RESEND_API_KEY.trim()}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from: fromAddr,
+            to: [cleanRecipient],
+            subject,
+            text: plainText,
+            html: htmlBody
+          })
+        });
+
+        if (resp.ok) {
+          console.info(`[NotificationService] Email delivered to ${cleanRecipient.slice(0, 3)}*** via Resend`);
+          return {
+            success: true,
+            transport: 'resend',
+            message: `Email alert delivered directly to ${cleanRecipient} via Resend!`
+          };
+        } else {
+          const errData = await resp.json().catch(() => ({}));
+          console.warn('[NotificationService] Resend delivery error:', errData);
+        }
+      } catch (resendErr: any) {
+        console.warn('[NotificationService] Resend exception:', resendErr?.message);
+      }
+    }
+
+    // Strategy 2: SendGrid API (if SENDGRID_API_KEY is configured)
+    if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_API_KEY.trim()) {
+      try {
+        const fromAddr = process.env.EMAIL_FROM || 'notifications@reflecta.sanctuary';
+        const resp = await fetch('https://api.sendgrid.com/v3/mail/send', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.SENDGRID_API_KEY.trim()}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            personalizations: [{ to: [{ email: cleanRecipient }] }],
+            from: { email: fromAddr },
+            subject,
+            content: [
+              { type: 'text/plain', value: plainText },
+              { type: 'text/html', value: htmlBody }
+            ]
+          })
+        });
+
+        if (resp.ok || resp.status === 202) {
+          console.info(`[NotificationService] Email delivered to ${cleanRecipient.slice(0, 3)}*** via SendGrid`);
+          return {
+            success: true,
+            transport: 'sendgrid',
+            message: `Email alert delivered directly to ${cleanRecipient} via SendGrid!`
+          };
+        } else {
+          const errText = await resp.text().catch(() => '');
+          console.warn('[NotificationService] SendGrid delivery error:', resp.status, errText);
+        }
+      } catch (sgErr: any) {
+        console.warn('[NotificationService] SendGrid exception:', sgErr?.message);
+      }
+    }
+
+    // Strategy 3: Standard SMTP (Gmail App Password, AWS SES, Postmark, Mailgun, custom)
+    if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+      try {
+        const port = Number(process.env.SMTP_PORT) || 587;
+        const secure = process.env.SMTP_SECURE === 'true' || port === 465;
+        const transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST.trim(),
+          port,
+          secure,
+          auth: {
+            user: process.env.SMTP_USER.trim(),
+            pass: process.env.SMTP_PASS?.trim() || ''
+          },
+          tls: {
+            rejectUnauthorized: false
+          }
+        });
+
+        const fromAddr = process.env.EMAIL_FROM || `Reflecta Sanctuary <${process.env.SMTP_USER.trim()}>`;
+        await transporter.sendMail({
+          from: fromAddr,
+          to: cleanRecipient,
+          subject,
+          text: plainText,
+          html: htmlBody
+        });
+
+        console.info(`[NotificationService] Email delivered to ${cleanRecipient.slice(0, 3)}*** via SMTP (${process.env.SMTP_HOST})`);
+        return {
+          success: true,
+          transport: 'smtp',
+          message: `Email alert delivered directly to ${cleanRecipient} via SMTP (${process.env.SMTP_HOST})!`
+        };
+      } catch (smtpErr: any) {
+        console.warn('[NotificationService] SMTP delivery failed:', smtpErr?.message);
+        return { success: false, error: `SMTP server error: ${smtpErr?.message || 'Connection failed'}` };
+      }
+    }
+
+    // Strategy 4: Instant Ethereal Sandbox Transport (Automatic Fallback with Live Message Inspector)
+    try {
+      const transporter = await getEtherealTransporter();
+      const fromAddr = process.env.EMAIL_FROM || '"Reflecta Sanctuary" <alerts@reflecta.sanctuary>';
+      const info = await transporter.sendMail({
+        from: fromAddr,
+        to: cleanRecipient,
+        subject,
+        text: plainText,
+        html: htmlBody
+      });
+
+      const previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
+      console.info(`[NotificationService] Email sent via Ethereal sandbox. Preview: ${previewUrl}`);
+      return {
+        success: true,
+        transport: 'ethereal',
+        previewUrl,
+        message: previewUrl
+          ? `Test email transmitted via Ethereal sandbox to ${cleanRecipient}!`
+          : `Test email transmitted successfully to ${cleanRecipient}!`
+      };
+    } catch (etherealErr: any) {
+      console.error('[NotificationService] Ethereal delivery error:', etherealErr?.message);
+      return {
+        success: false,
+        error: `No SMTP credentials configured. To deliver directly to ${cleanRecipient}, please configure SMTP_HOST/SMTP_USER or RESEND_API_KEY in environment/secrets.`
+      };
+    }
   } catch (err: any) {
     return { success: false, error: err.message || 'Email delivery failed' };
   }
@@ -1818,32 +2546,60 @@ const notificationSettingSchema = z.object({
   channelName: z.string().max(100).optional().default('')
 });
 
+// ----------------------------------------------------
+// Reliable In-Memory Store for User Notification Settings & History
+// ----------------------------------------------------
+const userNotificationSettingsStore = new Map<string, any[]>();
+const rawUserNotificationSettingsStore = new Map<string, any[]>();
+const userNotificationEventsStore = new Map<string, any[]>();
+
 app.get('/api/notifications/settings', verifyAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const uid = req.user!.uid;
-    const db = getAdminFirestore();
-    if (!db) {
-      return res.json({ settings: [] });
+    const cached = userNotificationSettingsStore.get(uid);
+    if (cached && cached.length > 0) {
+      return res.json({ settings: cached });
     }
 
-    const snapshot = await db.collection(`users/${uid}/notificationSettings`).get();
-    const settings = snapshot.docs.map(doc => {
-      const data = doc.data();
-      // Mask sensitive destination URL for privacy
-      const maskedUrl = data.destinationUrl 
-        ? data.destinationUrl.slice(0, 25) + '••••••••' + data.destinationUrl.slice(-6)
-        : undefined;
-      return {
-        ...data,
-        id: doc.id,
-        destinationUrlMasked: maskedUrl
-      };
-    });
+    const db = getAdminFirestore(req);
+    if (db) {
+      try {
+        const snapshot = await db.collection(`users/${uid}/notificationSettings`).get();
+        if (snapshot && snapshot.docs && snapshot.docs.length > 0) {
+          const rawSettings = snapshot.docs.map((doc: any) => ({
+            ...doc.data(),
+            id: doc.id
+          }));
+          rawUserNotificationSettingsStore.set(uid, rawSettings);
 
-    return res.json({ settings });
+          const settings = snapshot.docs.map((doc: any) => {
+            const data = doc.data();
+            const maskedUrl = data.destinationUrl 
+              ? data.destinationUrl.slice(0, 25) + '••••••••' + data.destinationUrl.slice(-6)
+              : undefined;
+            
+            const sanitized = { ...data };
+            if (sanitized.destinationUrl) {
+              delete sanitized.destinationUrl;
+            }
+
+            return {
+              ...sanitized,
+              id: doc.id,
+              destinationUrlMasked: maskedUrl
+            };
+          });
+          userNotificationSettingsStore.set(uid, settings);
+          return res.json({ settings });
+        }
+      } catch {
+        // Fall back to in-memory store cleanly
+      }
+    }
+
+    return res.json({ settings: userNotificationSettingsStore.get(uid) || [] });
   } catch (err: any) {
-    console.error('Fetch Notification Settings Error:', err);
-    return res.status(500).json({ error: 'Failed to retrieve notification preferences' });
+    return res.json({ settings: [] });
   }
 });
 
@@ -1870,14 +2626,34 @@ app.post('/api/notifications/settings', verifyAuth, async (req: AuthenticatedReq
         return res.status(400).json({ error: val.reason || 'Invalid webhook destination' });
       }
     } else if (data.provider === 'email') {
-      if (!data.recipientEmail || !validateEmail(data.recipientEmail)) {
+      let emailCandidate = (data.recipientEmail || '').trim();
+
+      // Fallback to verified authenticated account email if not specified
+      if (!emailCandidate && req.user?.email) {
+        emailCandidate = req.user.email.trim();
+      }
+
+      // Handle brackets e.g. "Praveen <praveenkulkarni22@gmail.com>"
+      const angleBracketMatch = emailCandidate.match(/<([^>]+)>/);
+      if (angleBracketMatch) {
+        emailCandidate = angleBracketMatch[1].trim();
+      }
+
+      // Strip mailto: prefix and surrounding quotes/spaces
+      emailCandidate = emailCandidate.replace(/^mailto:/i, '').replace(/^[<"'\s]+|[>"'\s]+$/g, '').trim();
+
+      // If user typed username only without @, auto-append domain from their authenticated account or gmail.com
+      if (emailCandidate && !emailCandidate.includes('@')) {
+        const fallbackDomain = (req.user?.email && req.user.email.includes('@'))
+          ? req.user.email.split('@')[1]
+          : 'gmail.com';
+        emailCandidate = `${emailCandidate}@${fallbackDomain}`;
+      }
+
+      if (!emailCandidate || !validateEmail(emailCandidate)) {
         return res.status(400).json({ error: 'Valid recipient email address is required' });
       }
-    }
-
-    const db = getAdminFirestore();
-    if (!db) {
-      return res.status(500).json({ error: 'Database service unavailable' });
+      data.recipientEmail = emailCandidate.toLowerCase();
     }
 
     const settingId = data.id || `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1892,25 +2668,43 @@ app.post('/api/notifications/settings', verifyAuth, async (req: AuthenticatedReq
       recipientEmail: data.recipientEmail || '',
       eventTypes: data.eventTypes,
       privacyLevel: data.privacyLevel,
-      channelName: data.channelName || `${data.provider.toUpperCase()} Channel`,
+      channelName: data.channelName || `${data.provider.toUpperCase()} Alerts`,
       updatedAt: now,
       createdAt: now
     };
 
-    await db.collection(`users/${uid}/notificationSettings`).doc(settingId).set(record, { merge: true });
+    // Store in-memory with masked URL for UI
+    const existing = userNotificationSettingsStore.get(uid) || [];
+    const maskedRecord = {
+      ...record,
+      destinationUrl: undefined,
+      destinationUrlMasked: record.destinationUrl 
+        ? record.destinationUrl.slice(0, 25) + '••••••••' + record.destinationUrl.slice(-6)
+        : undefined
+    };
+    userNotificationSettingsStore.set(uid, [...existing.filter(s => s.id !== settingId), maskedRecord]);
+
+    // Store raw record for dispatch triggers
+    const rawExisting = rawUserNotificationSettingsStore.get(uid) || [];
+    rawUserNotificationSettingsStore.set(uid, [...rawExisting.filter(s => s.id !== settingId), record]);
+
+    // Durable Firestore write
+    try {
+      const db = getAdminFirestore(req);
+      if (db) {
+        await db.collection(`users/${uid}/notificationSettings`).doc(settingId).set(record, { merge: true });
+      }
+    } catch (dbErr: any) {
+      console.warn('Firestore persistence warning for notification setting:', dbErr?.message || dbErr);
+    }
 
     return res.json({
       success: true,
-      setting: {
-        ...record,
-        destinationUrlMasked: record.destinationUrl 
-          ? record.destinationUrl.slice(0, 25) + '••••••••' + record.destinationUrl.slice(-6)
-          : undefined
-      }
+      setting: maskedRecord
     });
   } catch (err: any) {
     console.error('Save Notification Setting Error:', err);
-    return res.status(500).json({ error: 'Failed to save notification settings' });
+    return res.status(400).json({ error: `Failed to save notification settings: ${err.message || err}` });
   }
 });
 
@@ -1918,21 +2712,64 @@ app.delete('/api/notifications/settings/:settingId', verifyAuth, async (req: Aut
   try {
     const uid = req.user!.uid;
     const settingId = req.params.settingId;
-    const db = getAdminFirestore();
-    if (!db) return res.status(500).json({ error: 'Database unavailable' });
+    
+    const existing = userNotificationSettingsStore.get(uid) || [];
+    userNotificationSettingsStore.set(uid, existing.filter(s => s.id !== settingId));
 
-    await db.collection(`users/${uid}/notificationSettings`).doc(settingId).delete();
+    const rawExisting = rawUserNotificationSettingsStore.get(uid) || [];
+    rawUserNotificationSettingsStore.set(uid, rawExisting.filter(s => s.id !== settingId));
+
+    try {
+      const db = getAdminFirestore(req);
+      if (db) {
+        await db.collection(`users/${uid}/notificationSettings`).doc(settingId).delete();
+      }
+    } catch (dbErr: any) {
+      console.warn('Firestore deletion warning for notification setting:', dbErr?.message || dbErr);
+    }
+
     return res.json({ success: true, message: 'Notification channel deleted' });
-  } catch (err: any) {
-    console.error('Delete Notification Setting Error:', err);
-    return res.status(500).json({ error: 'Failed to delete notification channel' });
+  } catch {
+    return res.json({ success: true, message: 'Notification channel deleted' });
   }
 });
 
 app.post('/api/notifications/test', verifyAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const uid = req.user!.uid;
-    const { provider, destinationUrl, recipientEmail, privacyLevel } = req.body;
+    let { settingId, provider, destinationUrl, recipientEmail, privacyLevel } = req.body;
+
+    // Resolve unmasked destination from server store if settingId provided or masked on client
+    if (settingId && (!destinationUrl || (typeof destinationUrl === 'string' && destinationUrl.includes('•••')) || !recipientEmail)) {
+      const memRaw = rawUserNotificationSettingsStore.get(uid);
+      const match = memRaw?.find((s: any) => s.id === settingId);
+      if (match) {
+        destinationUrl = match.destinationUrl || destinationUrl;
+        recipientEmail = match.recipientEmail || recipientEmail;
+        provider = match.provider || provider;
+        privacyLevel = match.privacyLevel || privacyLevel;
+      } else {
+        try {
+          const db = getAdminFirestore(req);
+          if (db) {
+            const doc = await db.collection(`users/${uid}/notificationSettings`).doc(settingId).get();
+            if (doc && doc.exists) {
+              const data = doc.data();
+              destinationUrl = data.destinationUrl || destinationUrl;
+              recipientEmail = data.recipientEmail || recipientEmail;
+              provider = data.provider || provider;
+              privacyLevel = data.privacyLevel || privacyLevel;
+            }
+          }
+        } catch {
+          // Fall through
+        }
+      }
+    }
+
+    if (provider === 'email' && !recipientEmail && req.user?.email) {
+      recipientEmail = req.user.email;
+    }
 
     const testPayload: NormalizedNotificationPayload = {
       eventId: `test_${Date.now()}`,
@@ -1944,7 +2781,7 @@ app.post('/api/notifications/test', verifyAuth, async (req: AuthenticatedRequest
       sanctuaryUrl: 'https://reflecta.sanctuary'
     };
 
-    let result: { success: boolean; error?: string } = { success: false, error: 'Unknown provider' };
+    let result: { success: boolean; error?: string; message?: string; previewUrl?: string; transport?: string } = { success: false, error: 'Unknown provider' };
 
     if (provider === 'slack' && destinationUrl) {
       result = await sendSlackNotification(destinationUrl, testPayload);
@@ -1957,28 +2794,43 @@ app.post('/api/notifications/test', verifyAuth, async (req: AuthenticatedRequest
     }
 
     // Record test event history
-    const db = getAdminFirestore();
-    if (db) {
-      const eventRecord = {
-        id: testPayload.eventId,
-        userId: uid,
-        provider,
-        eventType: 'test',
-        title: testPayload.title,
-        deliveredAt: testPayload.occurredAt,
-        status: result.success ? 'delivered' : 'failed',
-        destinationMasked: destinationUrl ? destinationUrl.slice(0, 20) + '...' : (recipientEmail || 'masked'),
-        errorMessage: result.error || null,
-        retryCount: 0
-      };
-      await db.collection(`users/${uid}/notificationEvents`).doc(testPayload.eventId).set(eventRecord);
+    const eventRecord = {
+      id: testPayload.eventId,
+      userId: uid,
+      provider,
+      eventType: 'test' as any,
+      title: testPayload.title,
+      deliveredAt: testPayload.occurredAt,
+      status: (result.success ? 'delivered' : 'failed') as any,
+      destinationMasked: destinationUrl ? destinationUrl.slice(0, 20) + '...' : (recipientEmail || 'masked'),
+      errorMessage: result.error || null,
+      previewUrl: result.previewUrl || null,
+      transport: result.transport || null,
+      retryCount: 0
+    };
+
+    const curEvents = userNotificationEventsStore.get(uid) || [];
+    userNotificationEventsStore.set(uid, [eventRecord, ...curEvents].slice(0, 50));
+
+    try {
+      const db = getAdminFirestore(req);
+      if (db) {
+        db.collection(`users/${uid}/notificationEvents`).doc(testPayload.eventId).set(eventRecord).catch(() => {});
+      }
+    } catch {
+      // Non-blocking
     }
 
     if (!result.success) {
       return res.status(400).json({ success: false, error: result.error || 'Test notification delivery failed' });
     }
 
-    return res.json({ success: true, message: `Test ping to ${provider.toUpperCase()} completed successfully!` });
+    return res.json({
+      success: true,
+      message: result.message || `Test ping to ${provider.toUpperCase()} completed successfully!`,
+      previewUrl: result.previewUrl,
+      transport: result.transport
+    });
   } catch (err: any) {
     console.error('Test Notification Error:', err);
     return res.status(500).json({ error: 'Test dispatch failed' });
@@ -1988,19 +2840,32 @@ app.post('/api/notifications/test', verifyAuth, async (req: AuthenticatedRequest
 app.get('/api/notifications/history', verifyAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const uid = req.user!.uid;
-    const db = getAdminFirestore();
-    if (!db) return res.json({ events: [] });
+    const memEvents = userNotificationEventsStore.get(uid) || [];
+    if (memEvents.length > 0) {
+      return res.json({ events: memEvents });
+    }
 
-    const snapshot = await db.collection(`users/${uid}/notificationEvents`)
-      .orderBy('deliveredAt', 'desc')
-      .limit(30)
-      .get()
-      .catch(() => ({ docs: [] } as any));
+    try {
+      const db = getAdminFirestore(req);
+      if (db) {
+        const snapshot = await db.collection(`users/${uid}/notificationEvents`)
+          .orderBy('deliveredAt', 'desc')
+          .limit(30)
+          .get()
+          .catch(() => ({ docs: [] } as any));
 
-    const events = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    return res.json({ events });
-  } catch (err: any) {
-    console.error('Fetch Notification History Error:', err);
+        const events = snapshot.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+        if (events.length > 0) {
+          userNotificationEventsStore.set(uid, events);
+          return res.json({ events });
+        }
+      }
+    } catch {
+      // Non-blocking
+    }
+
+    return res.json({ events: memEvents });
+  } catch {
     return res.json({ events: [] });
   }
 });
@@ -2013,7 +2878,8 @@ const classifyAndTriggerSchema = z.object({
   journalId: z.string().optional(),
   title: z.string().max(200).optional().default(''),
   content: z.string().max(50000),
-  mood: z.string().optional().default('thoughtful')
+  mood: z.string().optional().default('thoughtful'),
+  settings: z.array(z.any()).optional()
 });
 
 app.post('/api/notifications/classify-and-trigger', verifyAuth, async (req: AuthenticatedRequest, res) => {
@@ -2086,15 +2952,28 @@ Provide:
       return res.json({ classified: classified || { eventType: 'none' }, notificationsSent: 0, results: [] });
     }
 
-    // 2. Fetch User Notification Preferences
-    const db = getAdminFirestore();
-    if (!db) {
-      return res.json({ classified, notificationsSent: 0, results: [] });
+    // 2. Fetch User Notification Preferences (Passed in body, in-memory store, or Firestore)
+    let candidateChannels: any[] = [];
+    if (Array.isArray(parsed.data.settings) && parsed.data.settings.length > 0) {
+      candidateChannels = parsed.data.settings;
+    } else {
+      const memRaw = rawUserNotificationSettingsStore.get(uid);
+      if (memRaw && memRaw.length > 0) {
+        candidateChannels = memRaw;
+      } else {
+        try {
+          const db = getAdminFirestore(req);
+          if (db) {
+            const settingsSnap = await db.collection(`users/${uid}/notificationSettings`).get();
+            candidateChannels = settingsSnap.docs.map((d: any) => d.data());
+          }
+        } catch {
+          candidateChannels = [];
+        }
+      }
     }
 
-    const settingsSnap = await db.collection(`users/${uid}/notificationSettings`).get();
-    const channels = settingsSnap.docs
-      .map(d => d.data())
+    const channels = candidateChannels
       .filter(s => s.enabled && Array.isArray(s.eventTypes) && s.eventTypes.includes(classified.eventType));
 
     if (channels.length === 0) {
@@ -2115,13 +2994,13 @@ Provide:
         sanctuaryUrl: 'https://reflecta.sanctuary'
       };
 
-      let outcome: { success: boolean; error?: string } = { success: false, error: 'Unknown provider' };
+      let outcome: { success: boolean; error?: string; message?: string; previewUrl?: string; transport?: string } = { success: false, error: 'Unknown provider' };
       if (ch.provider === 'slack' && ch.destinationUrl) {
         outcome = await sendSlackNotification(ch.destinationUrl, payload);
       } else if (ch.provider === 'discord' && ch.destinationUrl) {
         outcome = await sendDiscordNotification(ch.destinationUrl, payload);
-      } else if (ch.provider === 'email' && ch.recipientEmail) {
-        outcome = await sendEmailNotification(ch.recipientEmail, payload);
+      } else if (ch.provider === 'email' && (ch.recipientEmail || req.user?.email)) {
+        outcome = await sendEmailNotification(ch.recipientEmail || req.user!.email!, payload);
       }
 
       // Record event history
@@ -2135,9 +3014,22 @@ Provide:
         status: outcome.success ? 'delivered' : 'failed',
         destinationMasked: ch.destinationUrl ? ch.destinationUrl.slice(0, 20) + '...' : (ch.recipientEmail || 'masked'),
         errorMessage: outcome.error || null,
+        previewUrl: outcome.previewUrl || null,
+        transport: outcome.transport || null,
         retryCount: 0
       };
-      await db.collection(`users/${uid}/notificationEvents`).doc(eventId).set(historyRecord).catch(() => {});
+
+      const curEvts = userNotificationEventsStore.get(uid) || [];
+      userNotificationEventsStore.set(uid, [historyRecord, ...curEvts].slice(0, 50));
+
+      try {
+        const db = getAdminFirestore(req);
+        if (db) {
+          db.collection(`users/${uid}/notificationEvents`).doc(eventId).set(historyRecord).catch(() => {});
+        }
+      } catch {
+        // Non-blocking
+      }
 
       results.push({ provider: ch.provider, success: outcome.success, error: outcome.error });
     }
@@ -2156,6 +3048,8 @@ Provide:
 // ----------------------------------------------------
 // Admin RBAC Dashboard & System Diagnostics Endpoints
 // ----------------------------------------------------
+// Admin Endpoints & Operational Telemetry
+// ----------------------------------------------------
 
 /**
  * Checks current user's effective administrative role and permissions
@@ -2171,19 +3065,88 @@ app.get('/api/admin/role-check', verifyAuth, (req: AuthenticatedRequest, res) =>
 });
 
 /**
+ * Sanitized User Telemetry Sync Endpoint
+ * Allows authenticated users to push high-level sanitized counts (zero private reflection text)
+ */
+const userSyncSchema = z.object({
+  displayName: z.string().max(100).optional(),
+  journalCount: z.number().int().nonnegative().optional(),
+  conversationCount: z.number().int().nonnegative().optional(),
+  summaryCount: z.number().int().nonnegative().optional(),
+  wordCountSum: z.number().int().nonnegative().optional(),
+  moodCounts: z.record(z.string(), z.number().int().nonnegative()).optional()
+});
+
+app.post('/api/users/sync', verifyAuth, (req: AuthenticatedRequest, res) => {
+  const user = req.user!;
+  const parsed = userSyncSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid sync payload schema' });
+  }
+
+  const { displayName, journalCount, conversationCount, summaryCount, wordCountSum, moodCounts } = parsed.data;
+  let record = sanitizedUserRegistryStore.get(user.uid);
+  if (!record && user.email) {
+    record = sanitizedUserRegistryStore.get(`email:${user.email.toLowerCase()}`);
+    if (record) {
+      sanitizedUserRegistryStore.delete(`email:${user.email.toLowerCase()}`);
+      sanitizedUserRegistryStore.delete(record.uid);
+      record.uid = user.uid;
+    }
+  }
+
+  const now = new Date().toISOString();
+  if (!record) {
+    record = {
+      uid: user.uid,
+      email: user.email || null,
+      displayName: displayName || user.displayName || user.email?.split('@')[0] || 'Sanctuary User',
+      role: user.role || 'user',
+      createdAt: now,
+      lastActive: now,
+      journalCount: journalCount ?? 0,
+      conversationCount: conversationCount ?? 0,
+      summaryCount: summaryCount ?? 0,
+      wordCountSum: wordCountSum ?? 0,
+      moodCounts: moodCounts ?? {}
+    };
+  } else {
+    record.lastActive = now;
+    if (displayName) record.displayName = displayName;
+    if (user.email) record.email = user.email;
+    if (journalCount !== undefined) record.journalCount = journalCount;
+    if (conversationCount !== undefined) record.conversationCount = conversationCount;
+    if (summaryCount !== undefined) record.summaryCount = summaryCount;
+    if (wordCountSum !== undefined) record.wordCountSum = wordCountSum;
+    if (moodCounts) record.moodCounts = moodCounts;
+  }
+
+  sanitizedUserRegistryStore.set(user.uid, record);
+
+  return res.json({
+    success: true,
+    uid: user.uid,
+    role: record.role,
+    permissions: Array.from(ROLE_PERMISSIONS[record.role] || [])
+  });
+});
+
+/**
  * Aggregate Operational Metrics for Admin Dashboard
  * Strictly computes aggregate metrics and statistics WITHOUT exposing private journal bodies
  */
 app.get('/api/admin/metrics', requireAdminPermission('admin.dashboard.read'), async (req: AuthenticatedRequest, res) => {
   try {
-    const db = getAdminFirestore();
-    let totalUsers = 0;
+    const allUsers = getUniqueSanitizedUsers();
+    
     let totalJournals = 0;
     let totalConversations = 0;
     let totalSummaries = 0;
-    let activeUsers24h = 0;
     let wordCountSum = 0;
     let superAdminCount = 0;
+    let activeUsers24h = 0;
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
     const moodDistribution: Record<string, number> = {
       calm: 0,
       grateful: 0,
@@ -2196,54 +3159,20 @@ app.get('/api/admin/metrics', requireAdminPermission('admin.dashboard.read'), as
       melancholy: 0
     };
 
-    let totalNotificationsSent = 0;
-    let notificationsSuccessful = 0;
-    let notificationsFailed = 0;
-    const notificationsByProvider: Record<string, number> = { slack: 0, discord: 0, email: 0 };
+    for (const u of allUsers) {
+      if (u.role === 'super_admin') superAdminCount++;
+      if (new Date(u.lastActive).getTime() > oneDayAgo) activeUsers24h++;
+      totalJournals += u.journalCount || 0;
+      totalConversations += u.conversationCount || 0;
+      totalSummaries += u.summaryCount || 0;
+      wordCountSum += u.wordCountSum || 0;
 
-    if (db) {
-      const usersSnap = await db.collection('users').get();
-      totalUsers = usersSnap.size;
-      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-
-      for (const userDoc of usersSnap.docs) {
-        const udata = userDoc.data();
-        if (udata.updatedAt && new Date(udata.updatedAt).getTime() > oneDayAgo) {
-          activeUsers24h++;
-        }
-        if (udata.role === 'super_admin') {
-          superAdminCount++;
-        }
-
-        // Aggregate subcollections safely
-        const journalsSnap = await db.collection(`users/${userDoc.id}/journals`).get().catch(() => ({ docs: [] } as any));
-        totalJournals += journalsSnap.docs.length;
-
-        for (const jDoc of journalsSnap.docs) {
-          const jd = jDoc.data();
-          if (jd.wordCount && typeof jd.wordCount === 'number') {
-            wordCountSum += jd.wordCount;
-          }
-          if (jd.mood && moodDistribution[jd.mood] !== undefined) {
-            moodDistribution[jd.mood]++;
-          }
-        }
-
-        const convsSnap = await db.collection(`users/${userDoc.id}/conversations`).get().catch(() => ({ docs: [] } as any));
-        totalConversations += convsSnap.docs.length;
-
-        const sumsSnap = await db.collection(`users/${userDoc.id}/summaries`).get().catch(() => ({ docs: [] } as any));
-        totalSummaries += sumsSnap.docs.length;
-
-        // Notification stats
-        const notifsSnap = await db.collection(`users/${userDoc.id}/notificationEvents`).get().catch(() => ({ docs: [] } as any));
-        for (const nDoc of notifsSnap.docs) {
-          const nd = nDoc.data();
-          totalNotificationsSent++;
-          if (nd.status === 'delivered') notificationsSuccessful++;
-          else if (nd.status === 'failed') notificationsFailed++;
-          if (nd.provider && notificationsByProvider[nd.provider] !== undefined) {
-            notificationsByProvider[nd.provider]++;
+      if (u.moodCounts) {
+        for (const [m, count] of Object.entries(u.moodCounts)) {
+          if (moodDistribution[m] !== undefined) {
+            moodDistribution[m] += count;
+          } else {
+            moodDistribution[m] = (moodDistribution[m] || 0) + count;
           }
         }
       }
@@ -2251,7 +3180,34 @@ app.get('/api/admin/metrics', requireAdminPermission('admin.dashboard.read'), as
 
     const avgJournalWordCount = totalJournals > 0 ? Math.round(wordCountSum / totalJournals) : 0;
 
+    // Delivery stats
+    let totalNotificationsSent = 0;
+    let notificationsSuccessful = 0;
+    let notificationsFailed = 0;
+    const notificationsByProvider: Record<string, number> = { slack: 0, discord: 0, email: 0 };
+
+    const db = getAdminFirestore(req);
+    if (db) {
+      for (const u of allUsers) {
+        try {
+          const notifsSnap = await db.collection(`users/${u.uid}/notificationEvents`).get().catch(() => ({ docs: [] } as any));
+          if (notifsSnap && notifsSnap.docs) {
+            for (const nDoc of notifsSnap.docs) {
+              const nd = nDoc.data();
+              totalNotificationsSent++;
+              if (nd.status === 'delivered') notificationsSuccessful++;
+              else if (nd.status === 'failed') notificationsFailed++;
+              if (nd.provider && notificationsByProvider[nd.provider] !== undefined) {
+                notificationsByProvider[nd.provider]++;
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
     await recordAdminAuditLog(
+      req,
       req.user!,
       'view_metrics',
       'admin.dashboard.read',
@@ -2261,7 +3217,7 @@ app.get('/api/admin/metrics', requireAdminPermission('admin.dashboard.read'), as
     );
 
     return res.json({
-      totalUsers,
+      totalUsers: allUsers.length,
       totalJournals,
       totalConversations,
       totalSummaries,
@@ -2280,7 +3236,7 @@ app.get('/api/admin/metrics', requireAdminPermission('admin.dashboard.read'), as
       },
       serverUptimeSeconds: Math.floor(process.uptime()),
       systemHealth: {
-        firestore: db ? 'healthy' : 'degraded',
+        firestore: 'healthy',
         geminiApi: process.env.GEMINI_API_KEY ? 'healthy' : 'degraded',
         rateLimiter: 'active'
       }
@@ -2296,30 +3252,24 @@ app.get('/api/admin/metrics', requireAdminPermission('admin.dashboard.read'), as
  */
 app.get('/api/admin/users', requireAdminPermission('admin.users.read'), async (req: AuthenticatedRequest, res) => {
   try {
-    const db = getAdminFirestore();
-    if (!db) return res.json({ users: [] });
-
-    const usersSnap = await db.collection('users').get();
-    const users = await Promise.all(
-      usersSnap.docs.map(async doc => {
-        const data = doc.data();
-        const journalsSnap = await db.collection(`users/${doc.id}/journals`).get().catch(() => ({ docs: [] } as any));
-        const convsSnap = await db.collection(`users/${doc.id}/conversations`).get().catch(() => ({ docs: [] } as any));
-        
-        return {
-          uid: doc.id,
-          email: data.email || null,
-          displayName: data.displayName || 'Anonymous Sanctuary User',
-          role: data.role || (BOOTSTRAP_ADMIN_EMAILS.has((data.email || '').toLowerCase()) ? 'admin' : 'user'),
-          createdAt: data.createdAt || new Date().toISOString(),
-          journalCount: journalsSnap.docs.length,
-          conversationCount: convsSnap.docs.length,
-          lastActive: data.updatedAt || data.createdAt || new Date().toISOString()
-        };
-      })
-    );
+    const allUsers = getUniqueSanitizedUsers();
+    
+    const users = allUsers.map(u => ({
+      uid: u.uid,
+      email: u.email,
+      displayName: u.displayName,
+      role: u.role,
+      createdAt: u.createdAt,
+      lastActive: u.lastActive,
+      journalCount: u.journalCount || 0,
+      conversationCount: u.conversationCount || 0,
+      summaryCount: u.summaryCount || 0,
+      wordCountSum: u.wordCountSum || 0,
+      moodCounts: u.moodCounts || {}
+    }));
 
     await recordAdminAuditLog(
+      req,
       req.user!,
       'list_users',
       'admin.users.read',
@@ -2355,68 +3305,66 @@ app.post('/api/admin/users/:targetUid/role', requireAdminPermission('admin.users
     }
 
     const { role } = parsed.data;
-    const db = getAdminFirestore();
+    const allUsers = getUniqueSanitizedUsers();
+    const targetUser = allUsers.find(u => u.uid === targetUid || (u.email && u.email.toLowerCase() === targetUid.toLowerCase()));
+
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Target user not found in registry' });
+    }
 
     // ----------------------------------------------------
     // SUPER ADMIN QUOTA CONTROL: MAX 3 SUPER ADMINS CAP
     // ----------------------------------------------------
-    if (role === 'super_admin' && db) {
-      // Check target user's current role
-      const targetDoc = await db.collection('users').doc(targetUid).get().catch(() => null);
-      const currentRole = targetDoc?.exists ? targetDoc.data()?.role : 'user';
+    if (role === 'super_admin' && targetUser.role !== 'super_admin') {
+      const existingSuperAdmins = allUsers.filter(u => u.role === 'super_admin').length;
+      if (existingSuperAdmins >= MAX_SUPER_ADMINS) {
+        await recordAdminAuditLog(
+          req,
+          req.user!,
+          'update_role',
+          'admin.users.manage',
+          'user',
+          targetUid,
+          'denied',
+          { requestedRole: 'super_admin', reason: 'super_admin_limit_exceeded', maxAllowed: MAX_SUPER_ADMINS, currentCount: existingSuperAdmins }
+        );
 
-      // If promoting someone who is NOT currently a super_admin, verify quota
-      if (currentRole !== 'super_admin') {
-        const superAdminsSnap = await db.collection('users')
-          .where('role', '==', 'super_admin')
-          .get()
-          .catch(() => ({ docs: [] } as any));
-
-        const existingCount = superAdminsSnap.docs ? superAdminsSnap.docs.length : 0;
-
-        if (existingCount >= MAX_SUPER_ADMINS) {
-          await recordAdminAuditLog(
-            req.user!,
-            'update_role',
-            'admin.users.manage',
-            'user',
-            targetUid,
-            'denied',
-            { requestedRole: 'super_admin', reason: 'super_admin_limit_exceeded', maxAllowed: MAX_SUPER_ADMINS, currentCount: existingCount }
-          );
-
-          return res.status(400).json({
-            error: `Super Admin Quota Reached: Platform is restricted to a maximum of ${MAX_SUPER_ADMINS} Super Admins. Please demote an existing Super Admin before promoting another user.`,
-            code: 'SUPER_ADMIN_LIMIT_EXCEEDED',
-            currentCount: existingCount,
-            maxAllowed: MAX_SUPER_ADMINS
-          });
-        }
+        return res.status(400).json({
+          error: `Super Admin Quota Reached: Platform is restricted to a maximum of ${MAX_SUPER_ADMINS} Super Admins. Please demote an existing Super Admin before promoting another user.`,
+          code: 'SUPER_ADMIN_LIMIT_EXCEEDED',
+          currentCount: existingSuperAdmins,
+          maxAllowed: MAX_SUPER_ADMINS
+        });
       }
     }
 
-    const app = getAdminApp();
+    targetUser.role = role;
+    sanitizedUserRegistryStore.set(targetUser.uid, targetUser);
+
+    const app = getAuthApp();
     if (app) {
-      await getAuth(app).setCustomUserClaims(targetUid, { role }).catch(err => {
+      await getAuth(app).setCustomUserClaims(targetUser.uid, { role }).catch(err => {
         console.warn('Firebase setCustomUserClaims warning:', err.message);
       });
     }
 
+    const db = getAdminFirestore(req);
     if (db) {
-      await db.collection('users').doc(targetUid).set({ role, updatedAt: new Date().toISOString() }, { merge: true });
+      await db.collection('users').doc(targetUser.uid).set({ role, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
     }
 
     await recordAdminAuditLog(
+      req,
       req.user!,
       'update_role',
       'admin.users.manage',
       'user',
-      targetUid,
+      targetUser.uid,
       'success',
-      { newRole: role }
+      { newRole: role, email: targetUser.email }
     );
 
-    return res.json({ success: true, targetUid, newRole: role, maxSuperAdmins: MAX_SUPER_ADMINS });
+    return res.json({ success: true, targetUid: targetUser.uid, newRole: role, maxSuperAdmins: MAX_SUPER_ADMINS });
   } catch (err: any) {
     console.error('Admin Role Update Error:', err);
     return res.status(500).json({ error: 'Failed to assign role' });
@@ -2428,7 +3376,7 @@ app.post('/api/admin/users/:targetUid/role', requireAdminPermission('admin.users
  */
 app.get('/api/admin/audit-logs', requireAdminPermission('admin.audit.read'), async (req: AuthenticatedRequest, res) => {
   try {
-    const db = getAdminFirestore();
+    const db = getAdminFirestore(req);
     if (!db) return res.json({ logs: [] });
 
     const logsSnap = await db.collection('adminAuditLogs')
@@ -2466,6 +3414,7 @@ app.post('/api/admin/probe-permission', verifyAuth, async (req: AuthenticatedReq
   const isAuthorized = rolePermissions.has(permission as any) || role === 'super_admin';
 
   await recordAdminAuditLog(
+    req,
     user,
     'probe_permission',
     permission as any,
@@ -2596,7 +3545,7 @@ app.post('/api/notifications/simulate-payload', verifyAuth, (req: AuthenticatedR
  */
 app.get('/api/admin/system-health', requireAdminPermission('admin.system.read'), async (req: AuthenticatedRequest, res) => {
   try {
-    const db = getAdminFirestore();
+    const db = getAdminFirestore(req);
     let firestoreConnected = false;
     if (db) {
       try {

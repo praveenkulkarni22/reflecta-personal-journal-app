@@ -12,7 +12,16 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
-import { JournalEntry, Conversation, ConversationMessage, ConversationSummary, InnerLandscapeSynthesis, CalendarEvent } from '../types';
+import { 
+  JournalEntry, 
+  Conversation, 
+  ConversationMessage, 
+  ConversationSummary, 
+  InnerLandscapeSynthesis, 
+  CalendarEvent,
+  NotificationSetting,
+  NotificationEventRecord
+} from '../types';
 
 export enum OperationType {
   CREATE = 'create',
@@ -397,3 +406,83 @@ export async function toggleCalendarEventCompletion(userId: string, eventId: str
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
+
+// ----------------------------------------------------
+// External Notification Settings & Events (Owner-Bound)
+// ----------------------------------------------------
+
+export async function saveUserNotificationSetting(userId: string, setting: Partial<NotificationSetting> & { id: string }): Promise<NotificationSetting> {
+  assertUserAuth(userId);
+  const path = `users/${userId}/notificationSettings/${setting.id}`;
+  try {
+    const settingRef = doc(db, 'users', userId, 'notificationSettings', setting.id);
+    const now = new Date().toISOString();
+    const fullSetting: NotificationSetting = {
+      id: setting.id,
+      userId,
+      provider: setting.provider || 'discord',
+      enabled: setting.enabled !== false,
+      destinationUrl: setting.destinationUrl,
+      recipientEmail: setting.recipientEmail,
+      eventTypes: setting.eventTypes || ['goal', 'idea', 'reminder', 'highlight'],
+      privacyLevel: setting.privacyLevel || 'minimal',
+      channelName: setting.channelName || `${(setting.provider || 'discord').toUpperCase()} Alerts`,
+      createdAt: setting.createdAt || now,
+      updatedAt: now
+    };
+    await setDoc(settingRef, sanitizePayload(fullSetting), { merge: true });
+    return fullSetting;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function fetchUserNotificationSettings(userId: string): Promise<NotificationSetting[]> {
+  assertUserAuth(userId);
+  const path = `users/${userId}/notificationSettings`;
+  try {
+    const ref = collection(db, 'users', userId, 'notificationSettings');
+    const snap = await getDocs(ref);
+    return snap.docs.map(d => {
+      const data = d.data();
+      return {
+        ...data,
+        id: d.id || data.id || `setting-${Math.random().toString(36).slice(2, 9)}`
+      } as NotificationSetting;
+    });
+  } catch (error) {
+    // If collection is empty or offline, return empty list safely
+    return [];
+  }
+}
+
+export async function deleteUserNotificationSetting(userId: string, settingId: string): Promise<void> {
+  assertUserAuth(userId);
+  const path = `users/${userId}/notificationSettings/${settingId}`;
+  try {
+    const ref = doc(db, 'users', userId, 'notificationSettings', settingId);
+    await deleteDoc(ref);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function fetchUserNotificationEvents(userId: string, maxLimit = 50): Promise<NotificationEventRecord[]> {
+  assertUserAuth(userId);
+  const path = `users/${userId}/notificationEvents`;
+  try {
+    const ref = collection(db, 'users', userId, 'notificationEvents');
+    const q = query(ref, orderBy('deliveredAt', 'desc'), limit(maxLimit));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => {
+      const data = d.data();
+      return {
+        ...data,
+        id: d.id || data.id || `event-${Math.random().toString(36).slice(2, 9)}`
+      } as NotificationEventRecord;
+    });
+  } catch (error) {
+    return [];
+  }
+}
+

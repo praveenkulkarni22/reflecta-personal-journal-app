@@ -1,0 +1,6 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "database": "ai-studio-reflecta-2f58eae1-7e22-43dd-864b-9c9d14f37338"
+  }
+}

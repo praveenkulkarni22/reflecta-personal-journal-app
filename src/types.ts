@@ -202,6 +202,10 @@ export interface AdminMetrics {
   totalSummaries: number;
   activeUsers24h: number;
   avgJournalWordCount: number;
+  superAdminQuota?: {
+    current: number;
+    max: number;
+  };
   moodDistribution: Record<string, number>;
   notificationDeliveryStats: {
     totalSent: number;
@@ -225,6 +229,9 @@ export interface AdminUserInfo {
   createdAt: string;
   journalCount: number;
   conversationCount: number;
+  summaryCount?: number;
+  wordCountSum?: number;
+  moodCounts?: Record<string, number>;
   lastActive: string;
 }
 
@@ -248,6 +255,7 @@ export interface NotificationSetting {
   provider: NotificationProvider;
   enabled: boolean;
   destinationUrl?: string; // Webhook URL (masked in UI for privacy)
+  destinationUrlMasked?: string; // Masked Webhook URL (for safe rendering)
   recipientEmail?: string; // For email notifications
   eventTypes: NotificationEventType[]; // Triggers (e.g. ['goal', 'idea', 'reminder', 'highlight'])
   privacyLevel: 'minimal' | 'with_summary'; // 'minimal' = safe title + type + link; 'with_summary' = includes 1-sentence safe AI summary
@@ -267,6 +275,8 @@ export interface NotificationEventRecord {
   status: 'delivered' | 'failed' | 'skipped';
   destinationMasked: string;
   errorMessage?: string;
+  previewUrl?: string;
+  transport?: string;
   retryCount: number;
 }
 

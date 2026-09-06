@@ -12,8 +12,8 @@ import { InnerLandscapeModal } from './components/InnerLandscapeModal';
 import { InnerLandscapeView } from './components/InnerLandscapeView';
 import { FlipbookReader } from './components/FlipbookReader';
 import { PromptSparkModal } from './components/PromptSparkModal';
-import { AdminDashboardModal } from './components/AdminDashboardModal';
-import { NotificationSettingsModal } from './components/NotificationSettingsModal';
+import { AdminDashboardView } from './components/AdminDashboardView';
+import { NotificationSettingsView } from './components/NotificationSettingsView';
 import { ThankYouPage } from './components/ThankYouPage';
 import { InteractiveBackground } from './components/InteractiveBackground';
 import { useTheme } from './context/ThemeContext';
@@ -62,7 +62,7 @@ export default function App() {
 
   const [user, setUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'journal' | 'conversations' | 'archive' | 'calendar' | 'landscape'>('journal');
+  const [activeTab, setActiveTab] = useState<'journal' | 'conversations' | 'archive' | 'calendar' | 'landscape' | 'notifications' | 'admin'>('journal');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   
   // Data state
@@ -98,8 +98,6 @@ export default function App() {
   const [isLandscapeModalOpen, setIsLandscapeModalOpen] = useState(false);
   const [isFlipbookOpen, setIsFlipbookOpen] = useState(false);
   const [isSparksOpen, setIsSparksOpen] = useState(false);
-  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
-  const [isNotificationsModalOpen, setIsNotificationsModalOpen] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -110,13 +108,20 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthChange(async (firebaseUser) => {
       if (firebaseUser) {
+        const isBootstrapAdmin = Boolean(
+          firebaseUser.email && (
+            firebaseUser.email.toLowerCase() === 'praveenkulkarni22@gmail.com' ||
+            firebaseUser.email.toLowerCase().includes('admin')
+          )
+        );
+
         const profile: UserProfile = {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           displayName: firebaseUser.displayName,
           photoURL: firebaseUser.photoURL,
           createdAt: new Date().toISOString(),
-          role: 'user'
+          role: isBootstrapAdmin ? 'admin' : 'user'
         };
         setUser(profile);
         setAuthNotice(null);
@@ -154,6 +159,48 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  const syncUserSanitizedTelemetry = async (
+    currentJournals: JournalEntry[],
+    currentConvs: Conversation[],
+    currentSums: ConversationSummary[],
+    currentUser?: UserProfile | null
+  ) => {
+    try {
+      const token = await getCurrentUserToken();
+      if (!token) return;
+
+      const moodCounts: Record<string, number> = {};
+      let wordCountSum = 0;
+      currentJournals.forEach(j => {
+        if (j.mood) {
+          moodCounts[j.mood] = (moodCounts[j.mood] || 0) + 1;
+        }
+        if (j.content) {
+          const words = j.content.trim().split(/\s+/).filter(Boolean).length;
+          wordCountSum += words;
+        }
+      });
+
+      await fetch('/api/users/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          displayName: currentUser?.displayName || user?.displayName,
+          journalCount: currentJournals.length,
+          conversationCount: currentConvs.length,
+          summaryCount: currentSums.length,
+          wordCountSum,
+          moodCounts
+        })
+      });
+    } catch (err) {
+      console.debug('Telemetry sync note:', err);
+    }
+  };
+
   const loadUserData = async (uid: string) => {
     try {
       const [userJournals, userConvs, userSums, latestLandscape, userEvents] = await Promise.all([
@@ -168,6 +215,8 @@ export default function App() {
       setSummaries(userSums);
       setLandscapeSynthesis(latestLandscape);
       setEvents(userEvents);
+      // Synchronize sanitized counts for the administrative aggregated dashboard (zero private content sent)
+      syncUserSanitizedTelemetry(userJournals, userConvs, userSums, user);
     } catch (e) {
       console.warn('Error fetching Firestore user collections:', e);
     }
@@ -269,12 +318,10 @@ export default function App() {
       setCurrentEntry(saved);
       setJournals(prev => {
         const idx = prev.findIndex(j => j.id === saved.id);
-        if (idx >= 0) {
-          const updated = [...prev];
-          updated[idx] = saved;
-          return updated;
-        }
-        return [saved, ...prev];
+        const updated = idx >= 0 ? [...prev] : [saved, ...prev];
+        if (idx >= 0) updated[idx] = saved;
+        syncUserSanitizedTelemetry(updated, conversations, summaries, user);
+        return updated;
       });
       showToast('Reflection safely stored in your vault.');
 
@@ -292,7 +339,8 @@ export default function App() {
               body: JSON.stringify({
                 journalId: saved.id,
                 title: saved.title,
-                content: saved.content
+                content: saved.content,
+                mood: saved.mood
               })
             }).catch(err => console.debug('Background notification trigger notice:', err));
           }
@@ -368,7 +416,11 @@ export default function App() {
     if (!user) return;
     try {
       await deleteJournalEntry(user.uid, entryId);
-      setJournals(prev => prev.filter(j => j.id !== entryId));
+      setJournals(prev => {
+        const updated = prev.filter(j => j.id !== entryId);
+        syncUserSanitizedTelemetry(updated, conversations, summaries, user);
+        return updated;
+      });
       if (currentEntry.id === entryId) {
         setCurrentEntry({ title: '', content: '', mood: 'thoughtful', intention: 'free_expression' });
       }
@@ -680,8 +732,8 @@ export default function App() {
           setActiveTab={setActiveTab}
           onOpenLandscape={() => setActiveTab('landscape')}
           onOpenFlipbook={() => setIsFlipbookOpen(true)}
-          onOpenNotifications={() => setIsNotificationsModalOpen(true)}
-          onOpenAdmin={() => setIsAdminModalOpen(true)}
+          onOpenNotifications={() => setActiveTab('notifications')}
+          onOpenAdmin={() => setActiveTab('admin')}
           isFlipbookOpen={isFlipbookOpen}
           isLandscapeOpen={activeTab === 'landscape'}
           onNewReflection={() => {
@@ -712,8 +764,8 @@ export default function App() {
             onSignIn={handleSignIn}
             onSignOut={handleSignOut}
             onOpenSparks={() => setIsSparksOpen(true)}
-            onOpenNotifications={() => setIsNotificationsModalOpen(true)}
-            onOpenAdmin={() => setIsAdminModalOpen(true)}
+            onOpenNotifications={() => setActiveTab('notifications')}
+            onOpenAdmin={() => setActiveTab('admin')}
             isSidebarCollapsed={isSidebarCollapsed}
             onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           />
@@ -831,6 +883,14 @@ export default function App() {
                   isSynthesizing={isSynthesizing}
                 />
               )}
+
+              {activeTab === 'notifications' && (
+                <NotificationSettingsView entriesCount={journals.length} />
+              )}
+
+              {activeTab === 'admin' && (
+                <AdminDashboardView userRole={user?.role || 'user'} />
+              )}
             </NotebookPageFlipper>
           </main>
         </div>
@@ -881,17 +941,6 @@ export default function App() {
         isOpen={isSparksOpen}
         onClose={() => setIsSparksOpen(false)}
         onSelectSpark={handleSelectSpark}
-      />
-
-      <NotificationSettingsModal
-        isOpen={isNotificationsModalOpen}
-        onClose={() => setIsNotificationsModalOpen(false)}
-      />
-
-      <AdminDashboardModal
-        isOpen={isAdminModalOpen}
-        onClose={() => setIsAdminModalOpen(false)}
-        userRole={user?.role || 'user'}
       />
 
       {/* Accessible Toast Notification */}
