@@ -1,17 +1,4 @@
-import {
-  collection,
-  doc,
-  setDoc,
-  getDoc,
-  getDocs,
-  updateDoc,
-  deleteDoc,
-  query,
-  orderBy,
-  limit,
-  Timestamp
-} from 'firebase/firestore';
-import { db, auth } from './firebase';
+import { auth, getCurrentUserToken } from './firebase';
 import { 
   JournalEntry, 
   Conversation, 
@@ -77,7 +64,7 @@ export function sanitizePayload<T extends Record<string, any>>(obj: T): T {
   const clean = {} as Record<string, any>;
   for (const [key, val] of Object.entries(obj)) {
     if (val === undefined) continue;
-    if (val !== null && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date) && !(val instanceof Timestamp)) {
+    if (val !== null && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date)) {
       clean[key] = sanitizePayload(val);
     } else {
       clean[key] = val;
@@ -97,17 +84,78 @@ function assertUserAuth(userId: string) {
 }
 
 // ----------------------------------------------------
+// Secure DB Proxy Network Helpers
+// ----------------------------------------------------
+
+async function dbGet(path: string): Promise<any> {
+  const token = await getCurrentUserToken();
+  const headers: Record<string, string> = {
+    'Accept-Language': 'en',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+  const res = await fetch(`/api/db/get?path=${encodeURIComponent(path)}`, { headers });
+  if (!res.ok) {
+    if (res.status === 404) return null;
+    throw new Error(`Failed to get document at path: ${path}`);
+  }
+  const body = await res.json();
+  return body.data;
+}
+
+async function dbSet(path: string, data: any): Promise<void> {
+  const token = await getCurrentUserToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+  const res = await fetch(`/api/db/set?path=${encodeURIComponent(path)}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to set document at path: ${path}`);
+  }
+}
+
+async function dbDelete(path: string): Promise<void> {
+  const token = await getCurrentUserToken();
+  const headers: Record<string, string> = {
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+  const res = await fetch(`/api/db/delete?path=${encodeURIComponent(path)}`, {
+    method: 'POST',
+    headers
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to delete document at path: ${path}`);
+  }
+}
+
+async function dbList(path: string): Promise<any[]> {
+  const token = await getCurrentUserToken();
+  const headers: Record<string, string> = {
+    'Accept-Language': 'en',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+  const res = await fetch(`/api/db/list?path=${encodeURIComponent(path)}`, { headers });
+  if (!res.ok) {
+    throw new Error(`Failed to list documents at path: ${path}`);
+  }
+  const body = await res.json();
+  return body.documents || [];
+}
+
+// ----------------------------------------------------
 // User Profile
 // ----------------------------------------------------
 export async function syncUserProfile(user: { uid: string; email: string | null; displayName: string | null; photoURL: string | null }) {
   assertUserAuth(user.uid);
   const path = `users/${user.uid}`;
   try {
-    const userRef = doc(db, 'users', user.uid);
-    const userSnap = await getDoc(userRef);
-
-    if (!userSnap.exists()) {
-      await setDoc(userRef, sanitizePayload({
+    const existing = await dbGet(path);
+    if (!existing) {
+      await dbSet(path, sanitizePayload({
         uid: user.uid,
         email: user.email,
         displayName: user.displayName,
@@ -116,7 +164,8 @@ export async function syncUserProfile(user: { uid: string; email: string | null;
         updatedAt: new Date().toISOString()
       }));
     } else {
-      await updateDoc(userRef, sanitizePayload({
+      await dbSet(path, sanitizePayload({
+        ...existing,
         email: user.email,
         displayName: user.displayName,
         photoURL: user.photoURL,
@@ -136,9 +185,7 @@ export async function saveJournalEntry(userId: string, entry: Omit<JournalEntry,
   const id = entry.id || `entry_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const path = `users/${userId}/journals/${id}`;
   try {
-    const entryRef = doc(db, 'users', userId, 'journals', id);
     const now = new Date().toISOString();
-
     const fullEntry: JournalEntry = {
       ...entry,
       id,
@@ -146,8 +193,7 @@ export async function saveJournalEntry(userId: string, entry: Omit<JournalEntry,
       createdAt: now,
       updatedAt: now
     };
-
-    await setDoc(entryRef, sanitizePayload(fullEntry), { merge: true });
+    await dbSet(path, sanitizePayload(fullEntry));
     return fullEntry;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -158,10 +204,10 @@ export async function fetchUserJournals(userId: string, maxLimit = 50): Promise<
   assertUserAuth(userId);
   const path = `users/${userId}/journals`;
   try {
-    const journalsRef = collection(db, 'users', userId, 'journals');
-    const q = query(journalsRef, orderBy('createdAt', 'desc'), limit(maxLimit));
-    const snap = await getDocs(q);
-    return snap.docs.map(doc => doc.data() as JournalEntry);
+    const docs = await dbList(path);
+    const journals = docs as JournalEntry[];
+    journals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return journals.slice(0, maxLimit);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
@@ -171,8 +217,7 @@ export async function deleteJournalEntry(userId: string, entryId: string): Promi
   assertUserAuth(userId);
   const path = `users/${userId}/journals/${entryId}`;
   try {
-    const entryRef = doc(db, 'users', userId, 'journals', entryId);
-    await deleteDoc(entryRef);
+    await dbDelete(path);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
@@ -186,9 +231,7 @@ export async function createConversation(userId: string, title: string, journalE
   const convId = `conv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const path = `users/${userId}/conversations/${convId}`;
   try {
-    const convRef = doc(db, 'users', userId, 'conversations', convId);
     const now = new Date().toISOString();
-
     const conv: Conversation = {
       id: convId,
       userId,
@@ -199,8 +242,7 @@ export async function createConversation(userId: string, title: string, journalE
       messageCount: 0,
       journalEntryId
     };
-
-    await setDoc(convRef, sanitizePayload(conv));
+    await dbSet(path, sanitizePayload(conv));
     return conv;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
@@ -211,10 +253,10 @@ export async function fetchUserConversations(userId: string, maxLimit = 30): Pro
   assertUserAuth(userId);
   const path = `users/${userId}/conversations`;
   try {
-    const convsRef = collection(db, 'users', userId, 'conversations');
-    const q = query(convsRef, orderBy('updatedAt', 'desc'), limit(maxLimit));
-    const snap = await getDocs(q);
-    return snap.docs.map(doc => doc.data() as Conversation);
+    const docs = await dbList(path);
+    const convs = docs as Conversation[];
+    convs.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return convs.slice(0, maxLimit);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
@@ -224,10 +266,10 @@ export async function fetchConversationMessages(userId: string, conversationId: 
   assertUserAuth(userId);
   const path = `users/${userId}/conversations/${conversationId}/messages`;
   try {
-    const msgsRef = collection(db, 'users', userId, 'conversations', conversationId, 'messages');
-    const q = query(msgsRef, orderBy('timestamp', 'asc'), limit(100));
-    const snap = await getDocs(q);
-    return snap.docs.map(doc => doc.data() as ConversationMessage);
+    const docs = await dbList(path);
+    const msgs = docs as ConversationMessage[];
+    msgs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return msgs.slice(0, 100);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
@@ -242,26 +284,28 @@ export async function appendConversationMessage(
   const msgId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const path = `users/${userId}/conversations/${conversationId}/messages/${msgId}`;
   try {
-    const msgRef = doc(db, 'users', userId, 'conversations', conversationId, 'messages', msgId);
     const now = new Date().toISOString();
-
     const fullMsg: ConversationMessage = {
       ...message,
       id: msgId,
       timestamp: now
     };
-
-    await setDoc(msgRef, sanitizePayload(fullMsg));
+    await dbSet(path, sanitizePayload(fullMsg));
 
     // Update conversation parent metadata
-    const convRef = doc(db, 'users', userId, 'conversations', conversationId);
+    const convPath = `users/${userId}/conversations/${conversationId}`;
     const snippet = message.content.slice(0, 90).replace(/\n/g, ' ');
     
-    await updateDoc(convRef, sanitizePayload({
-      updatedAt: now,
-      lastMessageSnippet: snippet,
-    })).catch(async () => {
-      await setDoc(convRef, sanitizePayload({
+    const existingConv = await dbGet(convPath);
+    if (existingConv) {
+      await dbSet(convPath, sanitizePayload({
+        ...existingConv,
+        updatedAt: now,
+        lastMessageSnippet: snippet,
+        messageCount: (existingConv.messageCount || 0) + 1
+      }));
+    } else {
+      await dbSet(convPath, sanitizePayload({
         id: conversationId,
         userId,
         title: snippet.slice(0, 40) || 'Reflection Dialogue',
@@ -269,8 +313,8 @@ export async function appendConversationMessage(
         updatedAt: now,
         lastMessageSnippet: snippet,
         messageCount: 1
-      }), { merge: true });
-    });
+      }));
+    }
 
     return fullMsg;
   } catch (error) {
@@ -285,13 +329,16 @@ export async function saveConversationSummary(userId: string, summary: Conversat
   assertUserAuth(userId);
   const path = `users/${userId}/summaries/${summary.id}`;
   try {
-    const summaryRef = doc(db, 'users', userId, 'summaries', summary.id);
-    await setDoc(summaryRef, sanitizePayload(summary));
+    await dbSet(path, sanitizePayload(summary));
 
-    const convRef = doc(db, 'users', userId, 'conversations', summary.conversationId);
-    await updateDoc(convRef, sanitizePayload({
-      summary
-    })).catch(() => {});
+    const convPath = `users/${userId}/conversations/${summary.conversationId}`;
+    const existingConv = await dbGet(convPath);
+    if (existingConv) {
+      await dbSet(convPath, sanitizePayload({
+        ...existingConv,
+        summary
+      }));
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -301,10 +348,10 @@ export async function fetchUserSummaries(userId: string, maxLimit = 20): Promise
   assertUserAuth(userId);
   const path = `users/${userId}/summaries`;
   try {
-    const summariesRef = collection(db, 'users', userId, 'summaries');
-    const q = query(summariesRef, orderBy('createdAt', 'desc'), limit(maxLimit));
-    const snap = await getDocs(q);
-    return snap.docs.map(doc => doc.data() as ConversationSummary);
+    const docs = await dbList(path);
+    const summaries = docs as ConversationSummary[];
+    summaries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return summaries.slice(0, maxLimit);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
@@ -317,8 +364,7 @@ export async function saveLandscapeSynthesis(userId: string, synthesis: InnerLan
   assertUserAuth(userId);
   const path = `users/${userId}/insights/${synthesis.id}`;
   try {
-    const insightRef = doc(db, 'users', userId, 'insights', synthesis.id);
-    await setDoc(insightRef, sanitizePayload(synthesis));
+    await dbSet(path, sanitizePayload(synthesis));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -328,12 +374,11 @@ export async function fetchLatestLandscapeSynthesis(userId: string): Promise<Inn
   assertUserAuth(userId);
   const path = `users/${userId}/insights`;
   try {
-    const insightsRef = collection(db, 'users', userId, 'insights');
-    const q = query(insightsRef, orderBy('generatedAt', 'desc'), limit(1));
-    const snap = await getDocs(q);
-
-    if (snap.empty) return null;
-    return snap.docs[0].data() as InnerLandscapeSynthesis;
+    const docs = await dbList(path);
+    const insights = docs as InnerLandscapeSynthesis[];
+    if (insights.length === 0) return null;
+    insights.sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime());
+    return insights[0];
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
@@ -350,9 +395,7 @@ export async function saveCalendarEvent(
   const id = event.id || `event_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const path = `users/${userId}/events/${id}`;
   try {
-    const eventRef = doc(db, 'users', userId, 'events', id);
     const now = new Date().toISOString();
-
     const fullEvent: CalendarEvent = {
       ...event,
       id,
@@ -360,8 +403,7 @@ export async function saveCalendarEvent(
       createdAt: now,
       updatedAt: now
     };
-
-    await setDoc(eventRef, sanitizePayload(fullEvent), { merge: true });
+    await dbSet(path, sanitizePayload(fullEvent));
     return fullEvent;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -372,11 +414,10 @@ export async function fetchUserCalendarEvents(userId: string, maxLimit = 150): P
   assertUserAuth(userId);
   const path = `users/${userId}/events`;
   try {
-    const eventsRef = collection(db, 'users', userId, 'events');
-    const q = query(eventsRef, orderBy('date', 'asc'), limit(maxLimit));
-    const snap = await getDocs(q);
-
-    return snap.docs.map(doc => doc.data() as CalendarEvent);
+    const docs = await dbList(path);
+    const events = docs as CalendarEvent[];
+    events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    return events.slice(0, maxLimit);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
@@ -386,8 +427,7 @@ export async function deleteCalendarEvent(userId: string, eventId: string): Prom
   assertUserAuth(userId);
   const path = `users/${userId}/events/${eventId}`;
   try {
-    const eventRef = doc(db, 'users', userId, 'events', eventId);
-    await deleteDoc(eventRef);
+    await dbDelete(path);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
@@ -397,11 +437,14 @@ export async function toggleCalendarEventCompletion(userId: string, eventId: str
   assertUserAuth(userId);
   const path = `users/${userId}/events/${eventId}`;
   try {
-    const eventRef = doc(db, 'users', userId, 'events', eventId);
-    await updateDoc(eventRef, sanitizePayload({
-      isCompleted,
-      updatedAt: new Date().toISOString()
-    }));
+    const existing = await dbGet(path);
+    if (existing) {
+      await dbSet(path, sanitizePayload({
+        ...existing,
+        isCompleted,
+        updatedAt: new Date().toISOString()
+      }));
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
@@ -410,12 +453,10 @@ export async function toggleCalendarEventCompletion(userId: string, eventId: str
 // ----------------------------------------------------
 // External Notification Settings & Events (Owner-Bound)
 // ----------------------------------------------------
-
 export async function saveUserNotificationSetting(userId: string, setting: Partial<NotificationSetting> & { id: string }): Promise<NotificationSetting> {
   assertUserAuth(userId);
   const path = `users/${userId}/notificationSettings/${setting.id}`;
   try {
-    const settingRef = doc(db, 'users', userId, 'notificationSettings', setting.id);
     const now = new Date().toISOString();
     const fullSetting: NotificationSetting = {
       id: setting.id,
@@ -430,7 +471,7 @@ export async function saveUserNotificationSetting(userId: string, setting: Parti
       createdAt: setting.createdAt || now,
       updatedAt: now
     };
-    await setDoc(settingRef, sanitizePayload(fullSetting), { merge: true });
+    await dbSet(path, sanitizePayload(fullSetting));
     return fullSetting;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -441,17 +482,12 @@ export async function fetchUserNotificationSettings(userId: string): Promise<Not
   assertUserAuth(userId);
   const path = `users/${userId}/notificationSettings`;
   try {
-    const ref = collection(db, 'users', userId, 'notificationSettings');
-    const snap = await getDocs(ref);
-    return snap.docs.map(d => {
-      const data = d.data();
-      return {
-        ...data,
-        id: d.id || data.id || `setting-${Math.random().toString(36).slice(2, 9)}`
-      } as NotificationSetting;
-    });
+    const docs = await dbList(path);
+    return docs.map(data => ({
+      ...data,
+      id: data.id || `setting-${Math.random().toString(36).slice(2, 9)}`
+    } as NotificationSetting));
   } catch (error) {
-    // If collection is empty or offline, return empty list safely
     return [];
   }
 }
@@ -460,8 +496,7 @@ export async function deleteUserNotificationSetting(userId: string, settingId: s
   assertUserAuth(userId);
   const path = `users/${userId}/notificationSettings/${settingId}`;
   try {
-    const ref = doc(db, 'users', userId, 'notificationSettings', settingId);
-    await deleteDoc(ref);
+    await dbDelete(path);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
@@ -471,18 +506,11 @@ export async function fetchUserNotificationEvents(userId: string, maxLimit = 50)
   assertUserAuth(userId);
   const path = `users/${userId}/notificationEvents`;
   try {
-    const ref = collection(db, 'users', userId, 'notificationEvents');
-    const q = query(ref, orderBy('deliveredAt', 'desc'), limit(maxLimit));
-    const snap = await getDocs(q);
-    return snap.docs.map(d => {
-      const data = d.data();
-      return {
-        ...data,
-        id: d.id || data.id || `event-${Math.random().toString(36).slice(2, 9)}`
-      } as NotificationEventRecord;
-    });
+    const docs = await dbList(path);
+    const records = docs as NotificationEventRecord[];
+    records.sort((a, b) => new Date(b.deliveredAt).getTime() - new Date(a.deliveredAt).getTime());
+    return records.slice(0, maxLimit);
   } catch (error) {
     return [];
   }
 }
-

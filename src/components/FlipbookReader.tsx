@@ -198,40 +198,46 @@ export const FlipbookReader: React.FC<FlipbookReaderProps> = ({
             : 'bg-gradient-to-br from-[#fffefc] via-white to-[#fbf9f5] border-black/[0.08] shadow-[0_30px_60px_-15px_rgba(0,0,0,0.15),inset_0_1px_0_rgba(255,255,255,1),inset_0_-2px_0_rgba(0,0,0,0.04)]'
         }`}>
           
-          {/* Subtle 3D Book Spine Center Crease */}
-          <div className="absolute top-0 bottom-0 left-1/2 w-16 -translate-x-1/2 flipbook-spine-shadow pointer-events-none opacity-60" />
-
-          {/* Book Spine Stitching Effect */}
-          <div className={`absolute top-0 bottom-0 left-1/2 w-[1px] -translate-x-1/2 pointer-events-none ${
-            isDark ? 'bg-neutral-800' : 'bg-neutral-200'
-          }`} />
+          {/* Center Spiral Binding Rings */}
+          <div className="absolute top-8 bottom-8 left-1/2 -translate-x-1/2 w-8 hidden md:flex flex-col justify-between items-center z-20 pointer-events-none">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <div 
+                key={i} 
+                className={`w-5 h-2.5 rounded-full border shadow-md ${
+                  isDark 
+                    ? 'bg-neutral-800 border-neutral-600 shadow-[0_2px_4px_rgba(0,0,0,0.8)]' 
+                    : 'bg-stone-200 border-stone-400 shadow-[0_2px_4px_rgba(0,0,0,0.15)]'
+                }`} 
+              />
+            ))}
+          </div>
 
           {totalPages > 0 && currentEntry ? (
             <>
-              {/* Dynamic Turning Leaf Animation */}
+              {/* Dynamic Turning Leaf Animation with Two-Page Spread */}
               <AnimatePresence mode="wait">
                 <motion.div
                   key={currentEntry.id}
                   initial={{ 
                     opacity: 0, 
-                    rotateY: flipDirection === 'next' ? 22 : -22, 
-                    x: flipDirection === 'next' ? 30 : -30 
+                    rotateY: flipDirection === 'next' ? 25 : -25, 
+                    scale: 0.98
                   }}
-                  animate={{ opacity: 1, rotateY: 0, x: 0 }}
+                  animate={{ opacity: 1, rotateY: 0, scale: 1 }}
                   exit={{ 
                     opacity: 0, 
-                    rotateY: flipDirection === 'next' ? -22 : 22, 
-                    x: flipDirection === 'next' ? -30 : 30 
+                    rotateY: flipDirection === 'next' ? -25 : 25, 
+                    scale: 0.98 
                   }}
-                  transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                  className="space-y-6 overflow-y-auto pr-2 z-10"
+                  transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                  className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 relative z-10 flex-1 overflow-hidden min-h-[380px]"
                 >
-                  {/* Header Info */}
-                  <div className={`flex flex-wrap items-center justify-between gap-3 pb-5 border-b ${
-                    isDark ? 'border-neutral-800/80' : 'border-neutral-200/80'
+                  {/* Left Page (Verso - Meta & Details) */}
+                  <div className={`p-5 sm:p-7 rounded-2xl flex flex-col justify-between overflow-y-auto border ${
+                    isDark ? 'bg-neutral-900/90 border-white/[0.08]' : 'bg-[#fffefc] border-black/[0.06] shadow-xs'
                   }`}>
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-3 text-[11px] font-mono">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2 text-[11px] font-mono">
                         <span className={`flex items-center gap-1.5 ${isDark ? 'text-[#67C3DE]' : 'text-[#083847] font-semibold'}`}>
                           <Calendar className="w-3.5 h-3.5" />
                           <span>{formatFullDate(currentEntry.createdAt)}</span>
@@ -242,74 +248,84 @@ export const FlipbookReader: React.FC<FlipbookReaderProps> = ({
                         </span>
                       </div>
 
-                      <h3 className={`font-serif text-2xl sm:text-4xl font-normal tracking-tight ${
+                      <h3 className={`font-serif text-2xl sm:text-3xl font-normal tracking-tight ${
                         isDark ? 'text-neutral-100' : 'text-neutral-900'
                       }`}>
                         {currentEntry.title || 'Untitled Reflection'}
                       </h3>
+
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {currentEntry.location && (
+                          <span className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border ${
+                            isDark ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' : 'bg-blue-50 text-blue-800 border-blue-200'
+                          }`}>
+                            <MapPin className="w-3 h-3 text-blue-400" />
+                            <span>{currentEntry.location.name}</span>
+                          </span>
+                        )}
+                        {currentEntry.mood && (
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium capitalize border ${
+                            isDark ? 'bg-[#67C3DE]/15 text-[#67C3DE] border-[#67C3DE]/30' : 'bg-[#67C3DE]/20 text-[#083847] border-[#67C3DE]/50'
+                          }`}>
+                            {currentEntry.mood}
+                          </span>
+                        )}
+                        {currentEntry.intention && (
+                          <span className={`px-3 py-1 rounded-full text-xs font-mono capitalize border ${
+                            isDark ? 'bg-neutral-900 text-neutral-300 border-neutral-800' : 'bg-neutral-100 text-neutral-700 border-neutral-200'
+                          }`}>
+                            {currentEntry.intention.replace('_', ' ')}
+                          </span>
+                        )}
+                      </div>
+
+                      {currentEntry.photos && currentEntry.photos.length > 0 && (
+                        <div className="pt-3 space-y-2">
+                          <span className={`block text-[11px] font-mono uppercase tracking-wider ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                            Attached Memories
+                          </span>
+                          <div className="grid grid-cols-2 gap-2">
+                            {currentEntry.photos.map((photo) => (
+                              <div key={photo.id} className="p-1 rounded-xl bg-white dark:bg-neutral-800 border border-black/10 dark:border-white/10 shadow-2xs">
+                                <img src={photo.url} alt={photo.name || 'Photo'} className="h-20 w-full object-cover rounded-lg" />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      {currentEntry.location && (
-                        <span className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border ${
-                          isDark
-                            ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
-                            : 'bg-blue-50 text-blue-800 border-blue-200'
-                        }`}>
-                          <MapPin className="w-3 h-3 text-blue-400" />
-                          <span>{currentEntry.location.name}</span>
-                        </span>
-                      )}
-                      {currentEntry.mood && (
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium capitalize border ${
-                          isDark
-                            ? 'bg-[#67C3DE]/15 text-[#67C3DE] border-[#67C3DE]/30'
-                            : 'bg-[#67C3DE]/20 text-[#083847] border-[#67C3DE]/50'
-                        }`}>
-                          {currentEntry.mood}
-                        </span>
-                      )}
-                      {currentEntry.intention && (
-                        <span className={`px-3 py-1 rounded-full text-xs font-mono capitalize border ${
-                          isDark
-                            ? 'bg-neutral-900 text-neutral-300 border-neutral-800'
-                            : 'bg-neutral-100 text-neutral-700 border-neutral-200'
-                        }`}>
-                          {currentEntry.intention.replace('_', ' ')}
-                        </span>
-                      )}
+                    <div className={`pt-3 border-t text-[11px] font-mono flex items-center justify-between ${isDark ? 'border-neutral-800 text-neutral-500' : 'border-neutral-200 text-neutral-400'}`}>
+                      <span>Verso Page</span>
+                      <span>Leaf {safeCurrentPage + 1} of {totalPages}</span>
                     </div>
                   </div>
 
-                  {/* Photos Gallery if present */}
-                  {currentEntry.photos && currentEntry.photos.length > 0 && (
-                    <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
-                      {currentEntry.photos.map((photo) => (
-                        <div 
-                          key={photo.id}
-                          className="p-1 rounded-2xl bg-white dark:bg-neutral-800 border border-black/10 dark:border-white/10 shadow-sm shrink-0"
-                        >
-                          <img 
-                            src={photo.url} 
-                            alt={photo.name || 'Reflection Photo'} 
-                            className="h-28 w-auto max-w-[200px] object-cover rounded-xl"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Journal Body Content with Typographic Rhythm */}
-                  <div className={`text-base sm:text-lg leading-[1.8] font-light font-serif whitespace-pre-wrap ${
-                    isDark ? 'text-neutral-200 selection:bg-[#67C3DE]/20' : 'text-neutral-800 selection:bg-[#67C3DE]/20'
+                  {/* Right Page (Recto - Main Content Only on 1 Side) */}
+                  <div className={`p-5 sm:p-7 rounded-2xl flex flex-col justify-between overflow-y-auto border ${
+                    isDark ? 'bg-neutral-900/90 border-white/[0.08]' : 'bg-[#fffefc] border-black/[0.06] shadow-xs'
                   }`}>
-                    {currentEntry.content}
+                    <div className="space-y-4">
+                      <div className={`text-xs font-mono uppercase tracking-wider pb-2 border-b ${isDark ? 'border-neutral-800 text-neutral-400' : 'border-neutral-200 text-neutral-500'}`}>
+                        Reflective Passage (Recto)
+                      </div>
+                      <div className={`text-base sm:text-lg leading-[1.8] font-light font-serif whitespace-pre-wrap ${
+                        isDark ? 'text-neutral-200 selection:bg-[#67C3DE]/20' : 'text-neutral-800 selection:bg-[#67C3DE]/20'
+                      }`}>
+                        {currentEntry.content}
+                      </div>
+                    </div>
+
+                    <div className={`pt-3 border-t text-[11px] font-mono flex items-center justify-between ${isDark ? 'border-neutral-800 text-neutral-500' : 'border-neutral-200 text-neutral-400'}`}>
+                      <span>Sanctuary Vault</span>
+                      <span>{wordCount} words</span>
+                    </div>
                   </div>
                 </motion.div>
               </AnimatePresence>
 
               {/* Bottom Flipbook Navigation Bar */}
-              <div className={`flex items-center justify-between pt-6 border-t mt-6 z-10 ${
+              <div className={`flex items-center justify-between pt-5 border-t mt-5 z-10 ${
                 isDark ? 'border-neutral-800/80' : 'border-neutral-200/80'
               }`}>
                 <motion.button

@@ -30,6 +30,7 @@ interface ConversationViewProps {
   conversationTitle?: string;
   error?: string | null;
   onRetryLast?: () => void;
+  onNewConversation?: () => void;
 }
 
 const CONVERSATION_MODES = [
@@ -56,7 +57,8 @@ export const ConversationView: React.FC<ConversationViewProps> = ({
   modelUsed,
   conversationTitle,
   error,
-  onRetryLast
+  onRetryLast,
+  onNewConversation
 }) => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -143,6 +145,23 @@ export const ConversationView: React.FC<ConversationViewProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
+          {onNewConversation && (
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={onNewConversation}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
+                isDark
+                  ? 'bg-neutral-800 hover:bg-neutral-700 text-teal-300 border-teal-500/30 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
+                  : 'bg-teal-50 hover:bg-teal-100 text-teal-800 border-teal-200 shadow-sm'
+              }`}
+              title="End current conversation and start a new one"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-teal-500" />
+              <span>New Conversation</span>
+            </motion.button>
+          )}
+
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.97 }}

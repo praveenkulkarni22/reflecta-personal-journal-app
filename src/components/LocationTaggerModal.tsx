@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   MapPin, 
@@ -6,17 +6,18 @@ import {
   Crosshair, 
   X, 
   Check, 
-  Compass, 
-  ExternalLink, 
   Key, 
   Navigation,
   Globe,
-  Sparkles
+  ExternalLink
 } from 'lucide-react';
 import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { JournalLocation } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { getCurrentUserToken } from '../lib/firebase';
+import { decode, isFull, isShort, isValid, recoverNearest } from '@erikmichelson/open-location-code-ts';
 
 interface LocationTaggerModalProps {
   isOpen: boolean;
@@ -25,15 +26,87 @@ interface LocationTaggerModalProps {
   currentLocation?: JournalLocation;
 }
 
-// Preset sanctuary spots for rapid mindful journaling
-const SANCTUARY_PRESETS: { name: string; address: string; lat: number; lng: number }[] = [
+// Comprehensive global sanctuary and place presets for lightning-fast autocomplete & search
+const GLOBAL_PLACES_DATABASE = [
   { name: 'Kyoto Zen Gardens', address: 'Kyoto, Japan', lat: 35.0116, lng: 135.7681 },
   { name: 'Big Sur Pacific Coast', address: 'Highway 1, Big Sur, CA, USA', lat: 36.2704, lng: -121.8081 },
   { name: 'Central Park Conservatory', address: 'New York, NY, USA', lat: 40.7937, lng: -73.9521 },
   { name: 'Swiss Alpine Valley', address: 'Lauterbrunnen, Switzerland', lat: 46.5935, lng: 7.9090 },
-  { name: 'Home Writing Sanctuary', address: 'Quiet Study / Personal Haven', lat: 37.7749, lng: -122.4194 },
-  { name: 'Reykjavik Nordic Haven', address: 'Reykjavik, Iceland', lat: 64.1466, lng: -21.9426 }
+  { name: 'Reykjavik Nordic Haven', address: 'Reykjavik, Iceland', lat: 64.1466, lng: -21.9426 },
+  { name: 'Ubud Sacred Monkey Forest', address: 'Ubud, Bali, Indonesia', lat: -8.5158, lng: 115.2625 },
+  { name: 'Parisian Seine Riverside', address: 'Paris, France', lat: 48.8566, lng: 2.3522 },
+  { name: 'Tokyo Tower Sanctuary', address: 'Tokyo, Japan', lat: 35.6586, lng: 139.7454 },
+  { name: 'London Hyde Park', address: 'London, UK', lat: 51.5074, lng: -0.1278 },
+  { name: 'Sedona Red Rock Vortex', address: 'Sedona, AZ, USA', lat: 34.8697, lng: -111.7610 },
+  { name: 'Maui Coastal Retreat', address: 'Maui, Hawaii, USA', lat: 20.7984, lng: -156.3319 },
+  { name: 'Vancouver Pacific Sanctuary', address: 'Vancouver, BC, Canada', lat: 49.2827, lng: -123.1207 }
 ];
+
+// Interactive Leaflet Map Component (100% reliable pan, zoom, drag marker, click to drop marker)
+const InteractiveLeafletMap: React.FC<{
+  lat: number;
+  lng: number;
+  onLocationChange: (lat: number, lng: number) => void;
+}> = ({ lat, lng, onLocationChange }) => {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const markerRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+    if (!mapInstanceRef.current) {
+      const map = (L as any).map(mapContainerRef.current, {
+        center: [lat, lng],
+        zoom: 13,
+        zoomControl: true,
+        attributionControl: false
+      });
+
+      (L as any).tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+      }).addTo(map);
+
+      const customIcon = (L as any).divIcon({
+        className: 'custom-leaflet-marker',
+        html: `<div style="background-color: #0d9488; width: 32px; height: 32px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">📍</div>`,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16]
+      });
+
+      const marker = (L as any).marker([lat, lng], { draggable: true, icon: customIcon }).addTo(map);
+      markerRef.current = marker;
+
+      marker.on('dragend', () => {
+        const pos = marker.getLatLng();
+        onLocationChange(parseFloat(pos.lat.toFixed(5)), parseFloat(pos.lng.toFixed(5)));
+      });
+
+      map.on('click', (e: any) => {
+        const { lat: newLat, lng: newLng } = e.latlng;
+        marker.setLatLng([newLat, newLng]);
+        onLocationChange(parseFloat(newLat.toFixed(5)), parseFloat(newLng.toFixed(5)));
+      });
+
+      mapInstanceRef.current = map;
+    } else {
+      mapInstanceRef.current.setView([lat, lng], mapInstanceRef.current.getZoom(), { animate: true });
+      if (markerRef.current) {
+        markerRef.current.setLatLng([lat, lng]);
+      }
+    }
+  }, [lat, lng]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return <div ref={mapContainerRef} className="w-full h-full z-10" />;
+};
 
 export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
   isOpen,
@@ -47,9 +120,8 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
   const storedKey = typeof window !== 'undefined' ? localStorage.getItem('reflecta_maps_api_key') || '' : '';
   const defaultApiKey = ((import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY as string) || storedKey || '';
   const [apiKey, setApiKey] = useState(defaultApiKey);
-  const [showKeyConfig, setShowKeyConfig] = useState(!defaultApiKey);
+  const [showKeyConfig, setShowKeyConfig] = useState(false);
 
-  // Fetch API key dynamically from server secrets if not populated yet
   useEffect(() => {
     const fetchServerKey = async () => {
       try {
@@ -63,11 +135,10 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
           const data = await res.json();
           if (data?.apiKey) {
             setApiKey(data.apiKey);
-            setShowKeyConfig(false);
           }
         }
       } catch {
-        // Graceful fallback
+        // Fallback
       }
     };
 
@@ -84,22 +155,307 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
   });
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [gpsOrPlusCode, setGpsOrPlusCode] = useState('');
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
   const [detectionError, setDetectionError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (currentLocation) {
-      setLocationName(currentLocation.name);
-      setAddress(currentLocation.address || '');
-      if (currentLocation.lat && currentLocation.lng) {
-        setCoordinates({ lat: currentLocation.lat, lng: currentLocation.lng });
+    if (isOpen) {
+      if (currentLocation) {
+        setLocationName(currentLocation.name);
+        setAddress(currentLocation.address || '');
+        if (currentLocation.lat && currentLocation.lng) {
+          setCoordinates({ lat: currentLocation.lat, lng: currentLocation.lng });
+          setGpsOrPlusCode(`${currentLocation.lat.toFixed(5)}, ${currentLocation.lng.toFixed(5)}`);
+        }
+      } else {
+        handleDetectCurrentLocation();
       }
     }
   }, [currentLocation, isOpen]);
 
+  // Reverse geocoding helper to pinpoint and tag relevant place names dynamically
+  const reverseGeocode = async (lat: number, lng: number) => {
+    try {
+      const token = await getCurrentUserToken();
+      const url = `/api/geocode/reverse?lat=${lat}&lon=${lng}`;
+      const res = await fetch(url, {
+        headers: {
+          'Accept-Language': 'en',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data) {
+          const addr = data.address || {};
+          const placeName = addr.tourism || addr.amenity || addr.historic || addr.railway || addr.place || addr.shop || addr.building || addr.road || addr.suburb || addr.city || '';
+          
+          let displayPlaceName = '';
+          if (placeName) {
+            displayPlaceName = placeName.charAt(0).toUpperCase() + placeName.slice(1);
+          } else {
+            displayPlaceName = data.display_name.split(',').slice(0, 2).join(',');
+          }
+          
+          setLocationName(displayPlaceName || 'Reflection Spot');
+          setAddress(data.display_name || `${lat}° N, ${lng}° E`);
+        }
+      } else {
+        setLocationName('Reflection Spot');
+        setAddress(`${lat}° N, ${lng}° E`);
+      }
+    } catch (e) {
+      console.error('Reverse geocode error:', e);
+      setLocationName('Reflection Spot');
+      setAddress(`${lat}° N, ${lng}° E`);
+    }
+  };
+
+  // Sync GPS coordinate input field with coordinates when they change from the map or suggestions
+  useEffect(() => {
+    setGpsOrPlusCode(`${coordinates.lat.toFixed(5)}, ${coordinates.lng.toFixed(5)}`);
+  }, [coordinates]);
+
+  // Robust Dynamic Place Autocomplete (Combining Local Preset Database + OpenStreetMap Nominatim API)
+  useEffect(() => {
+    if (!searchQuery || searchQuery.trim().length < 1) {
+      setSuggestions([]);
+      return;
+    }
+
+    const queryLower = searchQuery.toLowerCase();
+    
+    // 1. Filter local global places database instantly
+    const localMatches = GLOBAL_PLACES_DATABASE.filter(
+      p => p.name.toLowerCase().includes(queryLower) || p.address.toLowerCase().includes(queryLower)
+    ).map(p => ({
+      display_name: `${p.name} — ${p.address}`,
+      name: p.name,
+      lat: p.lat.toString(),
+      lon: p.lng.toString()
+    }));
+
+    setSuggestions(localMatches);
+
+    // 2. Query OpenStreetMap Nominatim API for live autocomplete
+    const timer = setTimeout(async () => {
+      setIsSearchingPlaces(true);
+      try {
+        const token = await getCurrentUserToken();
+        const res = await fetch(`/api/geocode/search?q=${encodeURIComponent(searchQuery)}`, {
+          headers: {
+            'Accept-Language': 'en',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data)) {
+            const combined = [...localMatches, ...data.map((d: any) => ({
+              display_name: d.display_name,
+              name: d.name || d.display_name.split(',')[0],
+              lat: d.lat,
+              lon: d.lon
+            }))];
+            const unique: any[] = [];
+            const seen = new Set();
+            combined.forEach((item: any) => {
+              if (!seen.has(item.display_name)) {
+                seen.add(item.display_name);
+                unique.push(item);
+              }
+            });
+            setSuggestions(unique.slice(0, 7));
+          }
+        }
+      } catch {
+        // Keep local matches if network fails
+      } finally {
+        setIsSearchingPlaces(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const handleSelectSuggestion = (place: any) => {
+    const lat = parseFloat(place.lat);
+    const lng = parseFloat(place.lon);
+    setCoordinates({ lat, lng });
+    const name = place.name || place.display_name.split(',')[0];
+    setLocationName(name);
+    setAddress(place.display_name);
+    setSearchQuery(place.display_name);
+    setSuggestions([]);
+  };
+
+  // Explicit Search Button trigger
+  const handleSearchSubmit = async () => {
+    if (!searchQuery.trim()) return;
+    setIsSearchingPlaces(true);
+    setDetectionError(null);
+    try {
+      const token = await getCurrentUserToken();
+      const res = await fetch(`/api/geocode/search?q=${encodeURIComponent(searchQuery)}`, {
+        headers: {
+          'Accept-Language': 'en',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.length > 0) {
+          const first = data[0];
+          const lat = parseFloat(first.lat);
+          const lng = parseFloat(first.lon);
+          setCoordinates({ lat, lng });
+          
+          const name = first.name || first.display_name.split(',')[0];
+          setLocationName(name);
+          setAddress(first.display_name);
+          
+          const combined = data.map((d: any) => ({
+            display_name: d.display_name,
+            name: d.name || d.display_name.split(',')[0],
+            lat: d.lat,
+            lon: d.lon
+          }));
+          setSuggestions(combined);
+        } else {
+          setDetectionError('No locations found for your search query.');
+        }
+      } else {
+        setDetectionError('Error querying location search API.');
+      }
+    } catch {
+      setDetectionError('Network error during location search.');
+    } finally {
+      setIsSearchingPlaces(false);
+    }
+  };
+
+  // GPS Coordinates and Plus Code Input Resolver
+  const handleApplyGpsOrPlusCode = async () => {
+    const trimmed = gpsOrPlusCode.trim();
+    if (!trimmed) return;
+    setDetectionError(null);
+
+    // 1. Try to parse as standard Decimal Coordinates (e.g., "35.0116, 135.7681" or "35.0116 135.7681")
+    const latLngRegex = /^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)[,\s]+[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$/;
+    const match = trimmed.match(latLngRegex);
+    if (match) {
+      const parts = trimmed.split(/[,\s]+/).map(parseFloat);
+      if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        const lat = parseFloat(parts[0].toFixed(5));
+        const lng = parseFloat(parts[1].toFixed(5));
+        setCoordinates({ lat, lng });
+        await reverseGeocode(lat, lng);
+        return;
+      }
+    }
+
+    // 2. Try to parse as a Plus Code (Open Location Code)
+    const tokens = trimmed.split(/\s+/);
+    const codeIndex = tokens.findIndex(t => t.includes('+'));
+    
+    if (codeIndex !== -1) {
+      let codePart = tokens[codeIndex].trim();
+      // Clean up punctuation (trailing commas, semicolons, etc.)
+      codePart = codePart.replace(/[,;]$/, '').toUpperCase();
+      
+      if (isValid(codePart)) {
+        setIsSearchingPlaces(true);
+        try {
+          if (isFull(codePart)) {
+            const decoded = decode(codePart);
+            const lat = parseFloat(decoded.latitudeCenter.toFixed(5));
+            const lng = parseFloat(decoded.longitudeCenter.toFixed(5));
+            setCoordinates({ lat, lng });
+            await reverseGeocode(lat, lng);
+            return;
+          } else if (isShort(codePart)) {
+            // Find context part from remaining tokens
+            const otherTokens = tokens.filter((_, idx) => idx !== codeIndex);
+            const contextPart = otherTokens.join(' ').trim();
+            
+            let refLat = coordinates.lat;
+            let refLng = coordinates.lng;
+            
+            if (contextPart) {
+              const token = await getCurrentUserToken();
+              const res = await fetch(`/api/geocode/search?q=${encodeURIComponent(contextPart)}`, {
+                headers: {
+                  'Accept-Language': 'en',
+                  ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                }
+              });
+              if (res.ok) {
+                const data = await res.json();
+                if (data && data.length > 0) {
+                  refLat = parseFloat(data[0].lat);
+                  refLng = parseFloat(data[0].lon);
+                }
+              }
+            }
+            
+            const fullCode = recoverNearest(codePart, refLat, refLng);
+            const decoded = decode(fullCode);
+            const lat = parseFloat(decoded.latitudeCenter.toFixed(5));
+            const lng = parseFloat(decoded.longitudeCenter.toFixed(5));
+            setCoordinates({ lat, lng });
+            await reverseGeocode(lat, lng);
+            return;
+          }
+        } catch (err) {
+          console.error('Error decoding/resolving Plus Code:', err);
+          setDetectionError('Failed to parse or expand the Plus Code. Ensure it is correct.');
+          return;
+        } finally {
+          setIsSearchingPlaces(false);
+        }
+      }
+    }
+
+    // 3. Fallback: Query as standard location query via Nominatim search API
+    setIsSearchingPlaces(true);
+    try {
+      const token = await getCurrentUserToken();
+      const res = await fetch(`/api/geocode/search?q=${encodeURIComponent(trimmed)}`, {
+        headers: {
+          'Accept-Language': 'en',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.length > 0) {
+          const first = data[0];
+          const lat = parseFloat(first.lat);
+          const lng = parseFloat(first.lon);
+          setCoordinates({ lat, lng });
+          
+          const name = first.name || first.display_name.split(',')[0];
+          setLocationName(name);
+          setAddress(first.display_name);
+        } else {
+          setDetectionError('Could not find matching location for your input. Ensure Plus Code has city/region context if needed.');
+        }
+      } else {
+        setDetectionError('Error resolving the coordinates input.');
+      }
+    } catch {
+      setDetectionError('Network error resolving coordinates input.');
+    } finally {
+      setIsSearchingPlaces(false);
+    }
+  };
+
   // Browser Geolocation Detection
   const handleDetectCurrentLocation = () => {
     if (!navigator.geolocation) {
-      setDetectionError('Geolocation is not supported by your current browser.');
+      setDetectionError('Geolocation is not supported by your browser.');
       return;
     }
 
@@ -111,10 +467,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
         const lat = parseFloat(position.coords.latitude.toFixed(5));
         const lng = parseFloat(position.coords.longitude.toFixed(5));
         setCoordinates({ lat, lng });
-        if (!locationName) {
-          setLocationName('Current Reflection Sanctuary');
-        }
-        setAddress(`${lat}° N, ${lng}° W (Detected GPS Coordinates)`);
+        reverseGeocode(lat, lng);
         setIsDetectingLocation(false);
       },
       (error) => {
@@ -127,12 +480,6 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
-  };
-
-  const handleSelectPreset = (preset: typeof SANCTUARY_PRESETS[0]) => {
-    setLocationName(preset.name);
-    setAddress(preset.address);
-    setCoordinates({ lat: preset.lat, lng: preset.lng });
   };
 
   const handleConfirm = () => {
@@ -183,7 +530,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
               <div>
                 <h3 className="font-serif text-lg sm:text-xl font-medium">Tag Reflection Location</h3>
                 <p className={`text-xs ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                  Anchor this journal entry to a mindful place with Google Maps Platform
+                  Search places dynamically or move the map to pin your sanctuary
                 </p>
               </div>
             </div>
@@ -203,7 +550,65 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
           {/* Modal Body */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
             
-            {/* Quick Action: Current Location Detection & Presets */}
+            {/* Search Input with Dynamic Live Suggestions & Dedicated Search Button */}
+            <div className="relative">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-neutral-400">
+                    <Search className="w-3.5 h-3.5" />
+                  </span>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSearchSubmit();
+                      }
+                    }}
+                    placeholder="Type any city, landmark, or sanctuary (e.g. Kyoto, Paris, Central Park)..."
+                    className={`w-full pl-9 pr-8 py-2.5 text-xs rounded-xl border outline-none transition-colors ${
+                      isDark ? 'bg-neutral-950 border-neutral-700 focus:border-teal-500 text-white' : 'bg-white border-neutral-300 focus:border-teal-500 text-neutral-900'
+                    }`}
+                  />
+                  {isSearchingPlaces && (
+                    <span className="absolute inset-y-0 right-2 flex items-center pointer-events-none text-teal-500 text-[10px] font-mono">
+                      Searching...
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSearchSubmit}
+                  className="px-4 py-2.5 text-xs font-semibold text-white bg-teal-600 hover:bg-teal-500 rounded-xl cursor-pointer transition-colors shrink-0 shadow-sm"
+                >
+                  Search
+                </button>
+              </div>
+
+              {/* Dynamic Suggestions Dropdown */}
+              {suggestions.length > 0 && (
+                <div className={`absolute left-0 right-0 mt-1.5 z-50 rounded-xl border shadow-2xl overflow-hidden max-h-60 overflow-y-auto ${
+                  isDark ? 'bg-neutral-900 border-neutral-700 text-neutral-200' : 'bg-white border-neutral-200 text-neutral-800'
+                }`}>
+                  {suggestions.map((item, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleSelectSuggestion(item)}
+                      className={`w-full text-left px-3.5 py-3 text-xs flex items-center gap-2.5 border-b last:border-b-0 transition-colors cursor-pointer ${
+                        isDark ? 'hover:bg-neutral-800 border-neutral-800 text-neutral-200' : 'hover:bg-teal-50 border-neutral-100 text-neutral-800'
+                      }`}
+                    >
+                      <MapPin className="w-4 h-4 text-teal-500 shrink-0 mt-0.5" />
+                      <span className="truncate leading-relaxed font-medium">{item.display_name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-2">
               <button
                 type="button"
@@ -212,7 +617,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 text-teal-700 dark:text-teal-300 border border-teal-500/30 text-xs font-medium transition-all cursor-pointer shadow-sm"
               >
                 <Crosshair className={`w-3.5 h-3.5 ${isDetectingLocation ? 'animate-spin' : ''}`} />
-                <span>{isDetectingLocation ? 'Detecting GPS...' : 'Detect Current Location'}</span>
+                <span>{isDetectingLocation ? 'Detecting GPS...' : 'Detect Current GPS Location'}</span>
               </button>
 
               <button
@@ -223,7 +628,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                 }`}
               >
                 <Key className="w-3 h-3" />
-                <span>{apiKey ? 'Google Maps API Key (Active)' : 'Configure Maps API Key / Demo'}</span>
+                <span>{apiKey ? 'Google Maps API (Active)' : 'Configure Google Maps API'}</span>
               </button>
             </div>
 
@@ -233,7 +638,6 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
               </div>
             )}
 
-            {/* Google Maps API Key Panel (Prototyping / Production) */}
             {showKeyConfig && (
               <div className={`p-3.5 rounded-2xl border text-xs space-y-2.5 ${
                 isDark ? 'bg-neutral-950/60 border-teal-500/20' : 'bg-teal-50/70 border-teal-200'
@@ -241,7 +645,7 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="font-semibold flex items-center gap-1.5 text-teal-700 dark:text-teal-400">
                     <Globe className="w-3.5 h-3.5" />
-                    <span>Google Maps Platform Integration</span>
+                    <span>Google Maps API Key</span>
                   </span>
                   <a
                     href="https://mapsplatform.google.com/maps-demo-key?utm_campaign=gmp_mcp_codeassist_v1_aistudio"
@@ -249,13 +653,10 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                     rel="noreferrer"
                     className="text-[11px] underline text-teal-700 dark:text-teal-400 flex items-center gap-1 hover:opacity-80"
                   >
-                    <span>Get Free Maps Demo Key</span>
+                    <span>Get Key</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 </div>
-                <p className={`text-[11px] leading-relaxed ${isDark ? 'text-neutral-400' : 'text-neutral-600'}`}>
-                  To render the live interactive Google Map with AdvancedMarkerElement, paste your key below or use the free prototyping demo key. Coordinates and locations work seamlessly in all modes.
-                </p>
                 <div className="flex items-center gap-2">
                   <input
                     type="password"
@@ -276,155 +677,104 @@ export const LocationTaggerModal: React.FC<LocationTaggerModalProps> = ({
                     }}
                     className="px-3 py-1.5 text-xs font-medium rounded-xl bg-teal-600 text-white font-semibold cursor-pointer hover:bg-teal-500 transition-colors"
                   >
-                    Apply & Save
+                    Save
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Location Details Inputs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className={`block text-[11px] font-mono uppercase tracking-wider mb-1 ${
-                  isDark ? 'text-neutral-400' : 'text-neutral-500'
-                }`}>
-                  Sanctuary / Place Name
-                </label>
-                <input
-                  type="text"
-                  value={locationName}
-                  onChange={(e) => setLocationName(e.target.value)}
-                  placeholder="e.g. Kyoto Zen Gardens, Lake Tahoe Cabin..."
-                  className={`w-full px-3 py-2 text-xs rounded-xl border outline-none transition-colors ${
-                    isDark ? 'bg-neutral-950 border-neutral-700 focus:border-teal-500' : 'bg-white border-neutral-300 focus:border-teal-500'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className={`block text-[11px] font-mono uppercase tracking-wider mb-1 ${
-                  isDark ? 'text-neutral-400' : 'text-neutral-500'
-                }`}>
-                  Address / Context (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="e.g. Kyoto, Japan or GPS Coordinates..."
-                  className={`w-full px-3 py-2 text-xs rounded-xl border outline-none transition-colors ${
-                    isDark ? 'bg-neutral-950 border-neutral-700 focus:border-teal-500' : 'bg-white border-neutral-300 focus:border-teal-500'
-                  }`}
-                />
-              </div>
-            </div>
-
-            {/* Coordinates Display */}
-            <div className="flex items-center justify-between text-[11px] font-mono px-3 py-1.5 rounded-xl border bg-black/[0.02] dark:bg-white/[0.02] border-black/[0.06] dark:border-white/[0.06]">
-              <span className="flex items-center gap-1.5 opacity-70">
-                <Navigation className="w-3.5 h-3.5 text-teal-500" />
-                <span>Pinned Coordinates:</span>
-              </span>
-              <span className="font-semibold text-teal-700 dark:text-teal-400">
-                {coordinates.lat.toFixed(4)}° N, {coordinates.lng.toFixed(4)}° E
-              </span>
-            </div>
-
-            {/* Quick Mindful Sanctuary Place Presets */}
-            <div>
-              <span className={`block text-[10px] font-mono uppercase tracking-wider mb-1.5 ${
+            {/* GPS Coordinate / Plus Code Input with Apply button */}
+            <div className="space-y-1.5">
+              <label className={`block text-[11px] font-mono uppercase tracking-wider ${
                 isDark ? 'text-neutral-400' : 'text-neutral-500'
               }`}>
-                Or pick a mindful sanctuary haven:
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {SANCTUARY_PRESETS.map((preset) => (
-                  <button
-                    key={preset.name}
-                    type="button"
-                    onClick={() => handleSelectPreset(preset)}
-                    className={`px-2.5 py-1 rounded-full text-xs transition-all border cursor-pointer ${
-                      locationName === preset.name
-                        ? 'bg-teal-500/20 text-teal-700 dark:text-teal-300 border-teal-500/50 font-semibold'
-                        : isDark
-                          ? 'bg-neutral-950/60 text-neutral-400 border-white/[0.06] hover:text-white'
-                          : 'bg-neutral-50 text-neutral-600 border-neutral-200 hover:text-neutral-900'
-                    }`}
-                  >
-                    📍 {preset.name}
-                  </button>
-                ))}
+                GPS Coordinates or Plus Code
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={gpsOrPlusCode}
+                  onChange={(e) => setGpsOrPlusCode(e.target.value)}
+                  placeholder="e.g. 35.0116, 135.7681 or 8FGM+6X Kyoto, Japan"
+                  className={`flex-1 px-3 py-2 text-xs rounded-xl border outline-none transition-colors ${
+                    isDark ? 'bg-neutral-950 border-neutral-700 focus:border-teal-500 text-white font-mono' : 'bg-white border-neutral-300 focus:border-teal-500 text-neutral-900 font-mono'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={handleApplyGpsOrPlusCode}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-teal-600 hover:bg-teal-500 rounded-xl cursor-pointer transition-colors shrink-0 shadow-sm"
+                >
+                  Apply & Pin
+                </button>
               </div>
+              <p className={`text-[10px] ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>
+                Type decimals (e.g. <span className="font-mono">43.65, -79.38</span>) or a Plus Code to update map pin instantly.
+              </p>
             </div>
 
-            {/* Google Map Viewer Surface */}
-            <div className="relative rounded-2xl overflow-hidden border border-black/[0.08] dark:border-white/[0.08] h-52 sm:h-64 bg-neutral-100 dark:bg-neutral-950">
+            {/* Resolved Sanctuary & Context Info Card (Display Only) */}
+            <div className={`p-3.5 rounded-2xl border text-xs space-y-1.5 ${
+              isDark ? 'bg-neutral-950/40 border-neutral-800' : 'bg-neutral-50 border-neutral-200'
+            }`}>
+              <div className="flex items-center gap-1.5 font-semibold text-teal-700 dark:text-teal-400">
+                <Navigation className="w-4 h-4" />
+                <span>Resolved Place Name:</span>
+              </div>
+              <div className="font-serif text-sm font-medium">
+                {locationName || 'Reflection Spot (Not Resolved)'}
+              </div>
+              {address && (
+                <div className={`text-xs ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                  {address}
+                </div>
+              )}
+            </div>
+
+            {/* Fully Interactive Map (Google Maps if API Key present, or Interactive Leaflet Map) */}
+            <div className="relative rounded-2xl overflow-hidden border border-black/[0.08] dark:border-white/[0.08] h-64 sm:h-72 bg-neutral-100 dark:bg-neutral-950">
               {apiKey ? (
                 <APIProvider apiKey={apiKey}>
                   <Map
                     style={{ width: '100%', height: '100%' }}
                     defaultCenter={coordinates}
                     center={coordinates}
-                    defaultZoom={12}
-                    zoom={12}
+                    defaultZoom={13}
+                    zoom={13}
                     mapId="DEMO_MAP_ID"
                     internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
                     gestureHandling="greedy"
                     disableDefaultUI={false}
+                    zoomControl={true}
+                    streetViewControl={true}
+                    mapTypeControl={true}
                     onClick={(e) => {
                       if (e.detail?.latLng) {
                         const newLat = parseFloat(e.detail.latLng.lat.toFixed(5));
                         const newLng = parseFloat(e.detail.latLng.lng.toFixed(5));
                         setCoordinates({ lat: newLat, lng: newLng });
-                        if (!address) {
-                          setAddress(`${newLat}° N, ${newLng}° E`);
-                        }
+                        reverseGeocode(newLat, newLng);
                       }
                     }}
                   >
                     <AdvancedMarker position={coordinates}>
                       <Pin 
-                        background="#f59e0b" 
-                        borderColor="#78350f" 
+                        background="#0d9488" 
+                        borderColor="#115e59" 
                         glyphColor="#ffffff" 
                       />
                     </AdvancedMarker>
                   </Map>
                 </APIProvider>
               ) : (
-                /* Prototyping interactive styled canvas fallback if no key provided yet */
-                <div 
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = (e.clientX - rect.left) / rect.width;
-                    const y = (e.clientY - rect.top) / rect.height;
-                    const newLat = parseFloat((coordinates.lat + (0.5 - y) * 0.1).toFixed(4));
-                    const newLng = parseFloat((coordinates.lng + (x - 0.5) * 0.1).toFixed(4));
-                    setCoordinates({ lat: newLat, lng: newLng });
+                <InteractiveLeafletMap
+                  lat={coordinates.lat}
+                  lng={coordinates.lng}
+                  onLocationChange={(lat, lng) => {
+                    setCoordinates({ lat, lng });
+                    reverseGeocode(lat, lng);
                   }}
-                  className="w-full h-full relative cursor-crosshair flex flex-col items-center justify-center p-4 text-center select-none"
-                  style={{
-                    backgroundImage: isDark
-                      ? 'radial-gradient(#333 1px, transparent 1px), linear-gradient(to bottom, #18181b, #09090b)'
-                      : 'radial-gradient(#cbd5e1 1px, transparent 1px), linear-gradient(to bottom, #f8fafc, #f1f5f9)',
-                    backgroundSize: '24px 24px, 100% 100%'
-                  }}
-                >
-                  <div className="relative z-10 flex flex-col items-center gap-2 max-w-sm">
-                    <div className="w-10 h-10 rounded-full bg-teal-600 text-white flex items-center justify-center shadow-lg shadow-teal-500/30 animate-bounce">
-                      <MapPin className="w-5 h-5" />
-                    </div>
-                    <span className="font-serif font-medium text-sm">
-                      {locationName || 'Pinned Reflection Location'}
-                    </span>
-                    <span className="font-mono text-xs text-teal-600 dark:text-teal-400">
-                      {coordinates.lat}° N, {coordinates.lng}° E
-                    </span>
-                    <p className={`text-[11px] ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                      Click anywhere on this sanctuary grid to reposition pin marker.
-                    </p>
-                  </div>
-                </div>
+                />
               )}
             </div>
 

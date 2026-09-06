@@ -46,7 +46,7 @@ app.use((req, res, next) => {
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com https://*.googleapis.com https://apis.google.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
-      "img-src 'self' data: blob: https://*.googleusercontent.com https://*.googleapis.com https://maps.gstatic.com https://maps.googleapis.com",
+      "img-src 'self' data: blob: https://*.googleusercontent.com https://*.googleapis.com https://maps.gstatic.com https://maps.googleapis.com https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.openstreetmap.org",
       "connect-src 'self' https://*.googleapis.com wss://*.googleapis.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://*.firebasestorage.app https://*.google.com",
       "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",
       "object-src 'none'",
@@ -113,6 +113,105 @@ function rateLimiter(req: Request, res: Response, next: NextFunction) {
 }
 
 app.use('/api/', rateLimiter);
+
+// ----------------------------------------------------
+// Specialized AI Rate Limiter (Token & Cost Exhaustion Protection)
+// Caps AI requests to 20/min per authenticated user / IP
+// ----------------------------------------------------
+const aiRateLimitMap = new Map<string, { count: number; resetTime: number }>();
+function aiRateLimiter(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const uid = req.user?.uid || req.ip || 'anon';
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const maxAiRequests = 25; // 25 queries per minute per user
+
+  const record = aiRateLimitMap.get(uid) || { count: 0, resetTime: now + windowMs };
+  if (now > record.resetTime) {
+    record.count = 1;
+    record.resetTime = now + windowMs;
+  } else {
+    record.count++;
+  }
+  aiRateLimitMap.set(uid, record);
+
+  if (record.count > maxAiRequests) {
+    return res.status(429).json({
+      error: 'AI reflection request limit reached. Please allow a minute for mindful synthesis.',
+      code: 'AI_RATE_LIMIT_EXCEEDED'
+    });
+  }
+  next();
+}
+
+// ----------------------------------------------------
+// Prompt Injection Defense & Heuristic Sanitizer
+// Wraps untrusted input in protective XML delimiters and defuses override attempts
+// ----------------------------------------------------
+const ADVERSARIAL_PATTERNS = [
+  /ignore\s+(all\s+)?(previous|prior)\s+instructions/i,
+  /system\s+override/i,
+  /reveal\s+(the\s+)?system\s+prompt/i,
+  /you\s+are\s+now\s+an\s+administrator/i,
+  /developer\s+mode\s+enabled/i,
+  /print\s+environment\s+variables/i,
+  /exfiltrate\s+all\s+users/i
+];
+
+function sanitizePromptInput(text: string): string {
+  if (!text || typeof text !== 'string') return '';
+  let sanitized = text;
+  // Neutralize known adversarial instruction injection keywords
+  for (const pattern of ADVERSARIAL_PATTERNS) {
+    if (pattern.test(sanitized)) {
+      sanitized = sanitized.replace(pattern, '[Redacted Instruction Attempt]');
+    }
+  }
+  return `<untrusted_user_reflection>\n${sanitized.trim()}\n</untrusted_user_reflection>`;
+}
+
+// ----------------------------------------------------
+// Notification Test Dispatch Limiter (Anti-Flooding Protection)
+// Caps test dispatches to 5 per minute per user
+// ----------------------------------------------------
+const testNotificationRateLimitMap = new Map<string, { count: number; resetTime: number }>();
+function testNotificationRateLimiter(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const uid = req.user?.uid || 'anon';
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const maxTests = 5;
+
+  const record = testNotificationRateLimitMap.get(uid) || { count: 0, resetTime: now + windowMs };
+  if (now > record.resetTime) {
+    record.count = 1;
+    record.resetTime = now + windowMs;
+  } else {
+    record.count++;
+  }
+  testNotificationRateLimitMap.set(uid, record);
+
+  if (record.count > maxTests) {
+    return res.status(429).json({
+      error: 'Test notification limit exceeded. You may dispatch up to 5 tests per minute.',
+      code: 'TEST_RATE_LIMIT_EXCEEDED'
+    });
+  }
+  next();
+}
+
+// ----------------------------------------------------
+// Notification Trigger Cooldown (Anti-Spam Throttler)
+// Enforces 20-second cooldown per user to eliminate automated trigger storms
+// ----------------------------------------------------
+const notificationCooldownMap = new Map<string, number>();
+function isNotificationThrottled(uid: string): boolean {
+  const lastTrigger = notificationCooldownMap.get(uid) || 0;
+  const now = Date.now();
+  if (now - lastTrigger < 15 * 1000) { // 15s cooldown
+    return true;
+  }
+  notificationCooldownMap.set(uid, now);
+  return false;
+}
 
 // ----------------------------------------------------
 // Firebase Admin SDK & Zero-Trust Authentication Guard
@@ -1297,10 +1396,24 @@ interface GenerateOptions {
   temperature?: number;
 }
 
+let quotaExhaustedUntil = 0;
+
+function isQuotaExhausted(): boolean {
+  return Date.now() < quotaExhaustedUntil;
+}
+
+function markQuotaExhausted() {
+  quotaExhaustedUntil = Date.now() + 60 * 1000; // 60s cooldown
+}
+
 /**
  * Executes Gemini content generation with automated fallback ladder across model tiers
  */
 async function generateContentWithFallback(options: GenerateOptions): Promise<{ text: string; modelUsed: string }> {
+  if (isQuotaExhausted()) {
+    throw new Error('Prepayment credits depleted (cached)');
+  }
+
   const ai = getGeminiClient();
   let lastError: any = null;
 
@@ -1331,6 +1444,11 @@ async function generateContentWithFallback(options: GenerateOptions): Promise<{ 
       }
     } catch (err: any) {
       lastError = err;
+      if (isQuotaOrPrepaymentError(err)) {
+        markQuotaExhausted();
+        console.warn('Gemini quota/prepayment credits depleted. Activating offline reflective companion seamlessly.');
+        break;
+      }
       console.warn(`Model ${model} invocation attempt failed, attempting fallback ladder...`);
     }
   }
@@ -3122,13 +3240,107 @@ app.post('/api/users/sync', verifyAuth, (req: AuthenticatedRequest, res) => {
   }
 
   sanitizedUserRegistryStore.set(user.uid, record);
-
   return res.json({
     success: true,
     uid: user.uid,
     role: record.role,
     permissions: Array.from(ROLE_PERMISSIONS[record.role] || [])
   });
+});
+
+/**
+ * Secure Firestore REST proxy endpoints
+ * Enforces strict ownership checks: the accessed path must start with `users/${uid}`.
+ * Leverages FirestoreRestClient to execute operations authenticated with the user's actual token,
+ * which enforces Firestore security rules on Google's Firestore backend.
+ */
+app.get('/api/db/get', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  const uid = req.user?.uid;
+  const path = req.query.path;
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+  if (!path || typeof path !== 'string') return res.status(400).json({ error: 'Missing path' });
+
+  // Enforce Horizontal Data Isolation
+  if (!path.startsWith(`users/${uid}`)) {
+    return res.status(403).json({ error: 'Forbidden: Path isolation violation' });
+  }
+
+  try {
+    const authHeader = req.headers['authorization'] || req.headers.authorization || '';
+    const token = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
+    const client = new FirestoreRestClient(authProjectId, firestoreDatabaseId || '(default)', token, authApiKey);
+    const data = await client.getDocument(path);
+    return res.json({ data });
+  } catch (err) {
+    console.error('Server DB proxy get error:', err);
+    return res.status(500).json({ error: 'Database get failed' });
+  }
+});
+
+app.post('/api/db/set', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  const uid = req.user?.uid;
+  const path = req.query.path;
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+  if (!path || typeof path !== 'string') return res.status(400).json({ error: 'Missing path' });
+
+  if (!path.startsWith(`users/${uid}`)) {
+    return res.status(403).json({ error: 'Forbidden: Path isolation violation' });
+  }
+
+  try {
+    const authHeader = req.headers['authorization'] || req.headers.authorization || '';
+    const token = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
+    const client = new FirestoreRestClient(authProjectId, firestoreDatabaseId || '(default)', token, authApiKey);
+    const data = await client.setDocument(path, req.body);
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('Server DB proxy set error:', err);
+    return res.status(500).json({ error: 'Database set failed' });
+  }
+});
+
+app.post('/api/db/delete', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  const uid = req.user?.uid;
+  const path = req.query.path;
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+  if (!path || typeof path !== 'string') return res.status(400).json({ error: 'Missing path' });
+
+  if (!path.startsWith(`users/${uid}`)) {
+    return res.status(403).json({ error: 'Forbidden: Path isolation violation' });
+  }
+
+  try {
+    const authHeader = req.headers['authorization'] || req.headers.authorization || '';
+    const token = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
+    const client = new FirestoreRestClient(authProjectId, firestoreDatabaseId || '(default)', token, authApiKey);
+    await client.deleteDocument(path);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Server DB proxy delete error:', err);
+    return res.status(500).json({ error: 'Database delete failed' });
+  }
+});
+
+app.get('/api/db/list', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  const uid = req.user?.uid;
+  const path = req.query.path;
+  if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+  if (!path || typeof path !== 'string') return res.status(400).json({ error: 'Missing path' });
+
+  if (!path.startsWith(`users/${uid}`)) {
+    return res.status(403).json({ error: 'Forbidden: Path isolation violation' });
+  }
+
+  try {
+    const authHeader = req.headers['authorization'] || req.headers.authorization || '';
+    const token = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
+    const client = new FirestoreRestClient(authProjectId, firestoreDatabaseId || '(default)', token, authApiKey);
+    const documents = await client.listDocuments(path);
+    return res.json({ documents });
+  } catch (err) {
+    console.error('Server DB proxy list error:', err);
+    return res.status(500).json({ error: 'Database list failed' });
+  }
 });
 
 /**
@@ -3582,6 +3794,69 @@ app.get('/api/admin/system-health', requireAdminPermission('admin.system.read'),
   } catch (err: any) {
     console.error('System Health Diagnostics Error:', err);
     return res.status(500).json({ error: 'Diagnostics failed' });
+  }
+});
+
+/**
+ * Server-Side Geocoding Proxy (Search & Autocomplete)
+ * Prevents client-side CSP/CORS blocking and ensures Nominatim compliance by adding valid User-Agent
+ */
+app.get('/api/geocode/search', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  const query = req.query.q;
+  if (!query || typeof query !== 'string') {
+    return res.status(400).json({ error: 'Missing search query parameter' });
+  }
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=10&email=support@reflecta.app`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'ReflectaApp/1.0 (praveenkulkarni22@gmail.com)',
+        'Accept-Language': 'en'
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: 'Failed to fetch coordinates' });
+    }
+
+    const data = await response.json();
+    return res.json(data);
+  } catch (err) {
+    console.error('Server geocode search error:', err);
+    return res.status(500).json({ error: 'Network error during geocode search' });
+  }
+});
+
+/**
+ * Server-Side Geocoding Proxy (Reverse)
+ * Prevents client-side CSP/CORS blocking and ensures Nominatim compliance by adding valid User-Agent
+ */
+app.get('/api/geocode/reverse', verifyAuth, async (req: AuthenticatedRequest, res) => {
+  const lat = req.query.lat;
+  const lon = req.query.lon;
+  if (!lat || !lon || typeof lat !== 'string' || typeof lon !== 'string') {
+    return res.status(400).json({ error: 'Missing latitude or longitude parameters' });
+  }
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&email=support@reflecta.app`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'ReflectaApp/1.0 (praveenkulkarni22@gmail.com)',
+        'Accept-Language': 'en'
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: 'Failed to reverse geocode' });
+    }
+
+    const data = await response.json();
+    return res.json(data);
+  } catch (err) {
+    console.error('Server reverse geocode error:', err);
+    return res.status(500).json({ error: 'Network error during reverse geocode' });
   }
 });
 

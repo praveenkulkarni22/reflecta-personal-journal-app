@@ -325,6 +325,21 @@ export default function App() {
       });
       showToast('Reflection safely stored in your vault.');
 
+      // Clear editor state for a new reflection
+      setCurrentEntry({
+        id: 'draft-' + Date.now(),
+        userId: user.uid,
+        title: '',
+        content: '',
+        mood: undefined,
+        intention: 'free_expression',
+        tags: [],
+        photos: [],
+        location: undefined,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+
       // Asynchronously trigger server-side notification classification pipeline
       (async () => {
         try {
@@ -449,6 +464,12 @@ export default function App() {
       console.error('Failed to start reflection session:', err);
       showToast('Could not initialize reflection session.');
     }
+  };
+
+  const handleNewConversation = () => {
+    setActiveConversation(null);
+    setConversationMessages([]);
+    showToast('Started a fresh reflection dialogue.');
   };
 
   // Send Message in Multi-Turn Conversation
@@ -814,6 +835,7 @@ export default function App() {
                       modelUsed={lastModelUsed}
                       conversationTitle={activeConversation?.title || currentEntry.title}
                       error={genError}
+                      onNewConversation={handleNewConversation}
                       onRetryLast={() => {
                         const lastUserMsg = [...conversationMessages].reverse().find(m => m.role === 'user');
                         if (lastUserMsg) {
