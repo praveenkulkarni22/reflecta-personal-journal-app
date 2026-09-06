@@ -30,15 +30,55 @@ Reflecta is a secure, state-of-the-art **Full-Stack Personal Contemplative Journ
 ---
 
 ## 🔴 4. Application Architecture
-Reflecta utilizes a robust, decoupled **n-Tier Full-Stack Architecture**:
+Reflecta is built on a highly comprehensive, vertical, layered **n-Tier Architecture** that enforces clean separation of concerns, absolute token isolation, and severe runtime boundaries. Below is the comprehensive vertical architectural layout:
 
 ```text
-  [ Client Portal ] <--- (REST / JSON) ---> [ Express API Gateway ] <--- (gRPC / HTTPS) ---> [ Google Cloud Services ]
-   (React + Vite)                            (Node.js + Zod)                                 ├─ Secret Manager (Keys)
-         │                                          │                                        ├─ Firestore REST (DB)
-         ▼                                          ▼                                        └─ Gemini (AI SDK)
-  [ Ambient Noise ]                        [ SSRF & RBAC Shield ]
- (Web Audio + Canvas)                    (Firebase Admin Auth SDK)
+=== LAYER 1: CLIENT PRESENTATION (React & Web Audio) ===
+ │
+ ├──► Interactive Audio Engine (Web AudioContext Oscillator + Dual Gain Nodes)
+ │     └───► Dynamic Visualizer Canvas (High-resolution 60fps requestAnimationFrame)
+ │
+ ├──► Geospatial Tagging Stage (Leaflet Interactive Map Mapbox-Compatible Tiles)
+ │     └───► GPS Coordinate Resolver & Plus Code (OLC) Client-side Encoder
+ │
+ └──► Navigation State Core (React protected context, session routing filters)
+       │
+  (HTTPS / JSON Requests over SSL/TLS with Cryptographic Auth JWT Token)
+       │
+       ▼
+=== LAYER 2: MIDDLEWARE GATEWAY (Express Secure Controller) ===
+ │
+ ├──► CORS/CSP Policy Filters
+ │     └───► Enforces standard visual framing locks and blocks inline script bindings
+ │
+ ├──► Identity Verification Shield
+ │     └───► Decodes and validates Firebase ID tokens via Server-Side Admin SDK
+ │
+ ├──► Server-Side Rate Limiter & Zod Schema Sanitizer
+ │     └───► Enforces input bounds, validates fields, and intercepts payload errors
+ │
+ └──► SSRF Anti-Intrusion Firewall (Webhook Dispatcher Guard)
+       └───► Domain resolution verification, blocking local, loopback, or metadata subnets
+       │
+  (Secure Server-to-Server Backchannel Routing)
+       │
+       ▼
+=== LAYER 3: PERSISTENCE & CLOUD SERVICES (Google Cloud Platform) ===
+ │
+ ├──► Secret Manager Vault
+ │     └───► Safekeeping of API keys, loaded directly into local runtime container memory
+ │
+ ├──► Firebase User Registry
+ │     └───► Handles federated Single-Sign-On and JWT custom claim scopes
+ │
+ ├──► Cloud Firestore (via Server REST API Adapter)
+ │     └───► Stores journals, summaries, landscapes, and audit trails in UID-bound paths
+ │
+ ├──► Google Gemini AI Engine Fallback Ladder
+ │     └───► Dual-model prompt processing (gemini-3.6-flash, 3.1-flash-lite, 3.7-flash)
+ │
+ └──► OpenStreetMap Geocoding Proxy
+       └───► Converts coordinate pairs to street names and expands short Plus Codes
 ```
 
 ---
@@ -260,21 +300,88 @@ NODE_ENV="development"
 ---
 
 ## 🔴 19. Production Deployment
-Build the compiled application bundle and deploy to Google Cloud Run:
+Deploying a full-stack containerized application to Google Cloud Run requires a sequential, multi-layered initialization pipeline to correctly configure credentials, secure endpoints, enable APIs, and establish proper IAM permissions. Follow these detailed and intricate steps to get your Reflecta production environment live and secure:
+
+### Step 1: Initialize Project & CLI Context
+Authenticate and set your active Google Cloud Project workspace:
+```bash
+# Log in to your Google Account
+gcloud auth login
+
+# Bind gcloud CLI to your specific project ID
+gcloud config set project YOUR_GCP_PROJECT_ID
+```
+
+### Step 2: Enable Mandated Google Cloud APIs
+Enable the cloud services required for secure secret storage, serverless runtime processing, database persistence, and AI reasoning:
+```bash
+gcloud services enable \
+  run.googleapis.com \
+  secretmanager.googleapis.com \
+  firestore.googleapis.com \
+  aiplatform.googleapis.com
+```
+
+### Step 3: Configure Secret Manager Keys
+Create and lock down your server-side Gemini API credentials so that no secrets are exposed in code files or configuration repos:
+```bash
+# 1. Create a secret within the GCP Secret Manager Vault
+gcloud secrets create GEMINI_API_KEY \
+  --replication-policy="automatic"
+
+# 2. Add your active API token value to version 1 of the secret
+echo -n "YOUR_REAL_GEMINI_API_KEY_HERE" | \
+  gcloud secrets versions add GEMINI_API_KEY --data-file=-
+```
+
+### Step 4: Provision & Configure Firestore
+If you haven't initialized your Firestore Database yet, do so in Native Mode inside your preferred region:
+```bash
+gcloud firestore databases create \
+  --location=us-central1 \
+  --type=firestore-native
+```
+
+### Step 5: Establish Secure Service Accounts & IAM Permissions
+To ensure least-privilege security boundaries, map Secret Manager permissions directly to your Cloud Run runtime compute identity:
+```bash
+# 1. Determine your Google Project Number
+PROJECT_NUMBER=$(gcloud projects describe YOUR_GCP_PROJECT_ID --format="value(projectNumber)")
+
+# 2. Grant the default Cloud Run service account access to retrieve Secret Manager values
+gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+### Step 6: Compile & Package Application Assets
+Bundle your full-stack modules. This step bundles your server and generates your compiled client assets in `dist/`:
+```bash
+npm run build
+```
+
+### Step 7: Launch Serverless Container on Cloud Run
+Deploy your compiled full-stack service to Cloud Run.
+
+> [!IMPORTANT]
+> **Mandatory Action Required**: You **MUST** specify your list of administrator email addresses in the `ADMIN_EMAILS` variable. This environment variable is strictly mandatory to correctly bootstrap your Super Admin permissions on first login. Remove any placeholder emails from the deployment string before running the command.
 
 ```bash
-# 1. Build and compile the app with esbuild
-npm run build
-
-# 2. Deploy to Cloud Run injecting environment variables and secret manager bindings
 gcloud run deploy reflecta \
   --source . \
   --region us-central1 \
   --platform managed \
   --allow-unauthenticated \
   --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" \
-  --set-env-vars="ADMIN_EMAILS=praveenkulkarni22@gmail.com,admin@reflecta.app" \
+  --set-env-vars="ADMIN_EMAILS=your-configured-admin-email@domain.com,another-admin-address@domain.com" \
   --update-labels=dev-tutorial=cloud-run-ai-challenge
+```
+
+### Step 8: Verify Deployed Container Health
+Once deployed successfully, Cloud Run will output your live HTTPS production service URL. Test the service endpoint:
+```bash
+# Retrieve deployment status and base health status
+curl -i https://YOUR_DEPLOYED_SERVICE_URL/api/health
 ```
 
 ---
